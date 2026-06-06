@@ -1,0 +1,12 @@
+{
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}",
+    "/home/nmh/.local/lib/python3.14/site-packages"
+  ],
+  "python.autoComplete.extraPaths": [
+    "${workspaceFolder}",
+    "/home/nmh/.local/lib/python3.14/site-packages"
+  ]
+}
+
+

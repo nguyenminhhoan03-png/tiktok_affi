@@ -1,0 +1,30 @@
+version: "3.9"
+
+services:
+  tiktok-uploader:
+    build: .
+    image: tiktok-uploader:latest
+    container_name: tiktok-uploader
+
+    # Cho phép trình duyệt hiển thị GUI trên màn hình host (headful mode)
+    environment:
+      - DISPLAY=${DISPLAY:-:0}
+      - TIKTOK_COOKIES_FILE=/app/cookies/cookies.json
+      - VIDEOS_DIR=/app/videos
+      - LOGS_DIR=/app/logs
+
+    # Chia sẻ X11 socket để hiển thị browser GUI
+    volumes:
+      - ./videos:/app/videos          # Thư mục chứa video .mp4
+      - ./cookies:/app/cookies        # Thư mục chứa cookies đăng nhập
+      - ./logs:/app/logs              # Thư mục log
+      - ./config.json:/app/config.json
+      - /tmp/.X11-unix:/tmp/.X11-unix # X11 socket cho GUI
+
+    # Cần thiết để Chromium chạy được
+    shm_size: "2gb"
+    security_opt:
+      - seccomp:unconfined
+
+    # Mặc định chạy lệnh help, override khi dùng thực tế
+    command: ["--help"]

@@ -1,0 +1,10 @@
+{
+  "default_prompt_template": "Hãy tạo cho tôi một video (Generate a video): Quay cảnh thực tế review trên tay sản phẩm '{product_name}' (như trong ảnh đã tải lên). Một bạn nữ Việt Nam trẻ trung đang cầm và giới thiệu sản phẩm trước ống kính camera. Phong cách vlog review sản phẩm ngắn gọn, ánh sáng trong phòng sáng sủa.",
+  "default_caption_template": "🔥 {product_name} - Dùng thử là MÊ luôn! 😍\n👉 Bấm giỏ hàng góc trái để mua ngay giá ƯU ĐÃI nhé cả nhà!\n.\n.\n#{product_hashtag} #review #tiktokmademebuyit #tiktokshop #xuhuong #fyp #affiliate #muasamonline",
+  "tiktok_studio_url": "https://www.tiktok.com/tiktokstudio/upload",
+  "headless": false,
+  "delay_between_actions_min": 1.5,
+  "delay_between_actions_max": 3.5,
+  "type_delay_ms": 80,
+  "upload_timeout_ms": 120000
+}

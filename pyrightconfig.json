@@ -1,0 +1,12 @@
+{
+  "executionEnvironments": [
+    {
+      "root": "."
+    }
+  ],
+  "extraPaths": [
+    ".",
+    "/home/nmh/.local/lib/python3.14/site-packages"
+  ]
+}
+
