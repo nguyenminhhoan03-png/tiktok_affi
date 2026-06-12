@@ -6,5 +6,12 @@
   "delay_between_actions_min": 1.5,
   "delay_between_actions_max": 3.5,
   "type_delay_ms": 80,
-  "upload_timeout_ms": 120000
+  "upload_timeout_ms": 30000,
+  "video_engine": "gemini",
+  "kling_model": "kling-v1-6",
+  "kling_mode": "std",
+  "kling_duration": 5,
+  "kling_segments": 3,
+  "voiceover": false,
+  "bg_music": ""
 }

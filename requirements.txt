@@ -2,3 +2,5 @@ playwright==1.44.0
 python-dotenv==1.0.0
 loguru==0.7.2
 click==8.1.7
+imageio-ffmpeg>=0.4.9
+requests

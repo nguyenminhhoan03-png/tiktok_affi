@@ -154,28 +154,213 @@ def upload_all(caption: str, product: str):
 
 
 def make_hashtag(name: str) -> str:
-    """Tạo hashtag không dấu viết liền từ tên sản phẩm"""
+    """Tạo các hashtag ngắn gọn, không dấu từ tên sản phẩm"""
     import unicodedata
     import re
+    
+    # Rút gọn tên trước để tránh quá dài
+    cleaned_name = clean_product_name(name)
+    
     # Chuyển tiếng Việt có dấu thành không dấu
-    nfkd_form = unicodedata.normalize('NFKD', name)
+    nfkd_form = unicodedata.normalize('NFKD', cleaned_name)
     only_ascii = nfkd_form.encode('ASCII', 'ignore').decode('utf-8')
-    # Xóa ký tự đặc biệt và dấu cách
-    cleaned = re.sub(r'[^a-zA-Z0-9]', '', only_ascii)
-    return cleaned.lower()
+    
+    # Thay thế ký tự đặc biệt bằng khoảng trắng
+    words_str = re.sub(r'[^a-zA-Z0-9\s]', ' ', only_ascii)
+    # Tách từ và lọc từ rỗng
+    words = [w.lower() for w in words_str.split() if w.strip()]
+    
+    if not words:
+        return "sanpham"
+        
+    # Tạo hashtag chính bằng cách nối các từ bằng dấu gạch dưới, ví dụ: rosys12_vay_cong_so
+    main_tag = "_".join(words)
+    
+    # Kiểm tra xem sản phẩm có phải cho nam giới không
+    name_lower = name.lower()
+    name_for_check = name_lower.replace("việt nam", "").replace("vietnam", "").replace("viet nam", "")
+    is_male = False
+    for word in ["nam", "men", "man", "mens", "con trai", "mr", "gentleman", "gentlemen"]:
+        if re.search(r'\b' + re.escape(word) + r'\b', name_for_check):
+            is_male = True
+            break
+
+    # Thêm các hashtag phụ liên quan
+    sub_tags = []
+    if any(w in words for w in ["vay", "dam"]):
+        sub_tags.extend(["vaycongso", "vaythietke", "thoitrangnu" if not is_male else "thoitrangnam"])
+    elif "ao" in words:
+        sub_tags.extend(["aothun", "aokhoac", "thoitrangnam" if is_male else "thoitrangnu"])
+    elif any(w in words for w in ["giay", "dep", "sandal"]):
+        sub_tags.extend(["giaydep", "giaynam" if is_male else "giayxinh", "depnam" if is_male else "depxinh"])
+        
+    # Ghép lại. Vì trong template có sẵn dấu '#' trước {product_hashtag},
+    # từ đầu tiên sẽ không có dấu '#', các từ tiếp theo có dấu '#'
+    result = main_tag
+    for tag in sub_tags:
+        result += f" #{tag}"
+        
+    return result
+
+# Helper to generate SEO-friendly caption using product description
+
+def generate_seo_caption(product_name: str, product_description: str | None) -> str:
+    """Create a caption that combines product name, a concise description snippet, and relevant hashtags.
+    If description is missing, fallback to a simple template.
+    """
+    product_hashtag = make_hashtag(product_name)
+    desc_snippet = ""
+    if product_description:
+        clean_desc = " ".join(product_description.split())
+        desc_snippet = clean_desc[:120]
+        if len(clean_desc) > 120:
+            desc_snippet += "..."
+    if desc_snippet:
+        return f"🔥 {product_name}: {desc_snippet} #{product_hashtag}"
+    else:
+        default_caption = "🔥 {product_name} cực hot đã có mặt tại giỏ hàng! #{product_hashtag}"
+        return default_caption.format(product_name=product_name, product_hashtag=product_hashtag)
+
+
+def determine_product_type(product_name: str) -> str:
+    name_lower = product_name.lower()
+    clothing_keywords = [
+        "váy", "đầm", "áo", "quần", "set bộ", "set đồ", "vest", "khoác", "croptop", "hoodie", 
+        "cardigan", "jeans", "jean", "sơ mi", "thun", "phông", "len", "nỉ", "yếm", "đồ lót", 
+        "bra", "bikini", "đồ ngủ", "pijama", "tất", "vớ", "mũ", "nón", "thắt lưng", "dây nịt",
+        "tutu", "skirt", "dress", "pants", "shirt", "t-shirt", "jacket", "coat"
+    ]
+    footwear_keywords = [
+        "giày", "dép", "sandal", "guốc", "sneaker", "boot", "boots", "slippers", "sục"
+    ]
+    
+    for kw in clothing_keywords:
+        if kw in name_lower:
+            return "clothing"
+    for kw in footwear_keywords:
+        if kw in name_lower:
+            return "footwear"
+    return "general"
+
+
+def clean_product_name(product_name: str) -> str:
+    """Rút gọn tên sản phẩm dài dòng từ TikTok Shop thành tên sản phẩm cốt lõi ngắn gọn để AI tập trung render."""
+    if not product_name:
+        return "sản phẩm"
+    
+    name_lower = product_name.lower()
+    
+    # 1. Tìm các từ khóa thời trang/giày dép, công nghệ, gia dụng phổ biến để lấy cụm từ cốt lõi
+    core_keywords = [
+        # Thời trang & Giày dép
+        "váy dự tiệc", "váy công sở", "váy tiểu thư", "váy dáng dài", "váy xòe", "váy",
+        "đầm dự tiệc", "đầm công sở", "đầm tiểu thư", "đầm dáng dài", "đầm",
+        "áo sơ mi", "áo thun", "áo phông", "áo khoác", "áo croptop", "áo hoodie", "áo len", "áo nỉ", "áo",
+        "quần jeans", "quần jean", "quần tây", "quần short", "quần dài", "quần",
+        "set bộ", "set đồ", "bộ quần áo",
+        "giày sneaker", "giày cao gót", "giày tây", "giày thể thao", "giày",
+        "dép quai ngang", "dép sandal", "dép", "sandal", "guốc",
+        # Đồ công nghệ
+        "tai nghe bluetooth", "tai nghe không dây", "tai nghe", "loa bluetooth", "loa không dây", "loa",
+        "sạc dự phòng", "củ sạc nhanh", "củ sạc", "cáp sạc", "dây sạc", "chuột không dây", "chuột máy tính",
+        "bàn phím cơ", "bàn phím bluetooth", "bàn phím", "quạt tích điện", "quạt mini", "quạt",
+        "ốp lưng", "kính cường lực", "giá đỡ điện thoại",
+        # Mỹ phẩm & Chăm sóc cá nhân
+        "kem chống nắng", "sữa rửa mặt", "nước hoa", "son kem", "son thỏi", "son môi", "son",
+        "serum dưỡng da", "serum", "kem dưỡng ẩm", "kem dưỡng", "tẩy trang",
+        # Gia dụng & Đồ dùng khác
+        "nồi chiên không dầu", "máy xay sinh tố", "bình giữ nhiệt", "quạt để bàn", "đèn học chống cận", "đèn học",
+        "kệ để đồ", "hộp đựng thức ăn"
+    ]
+    
+    for kw in core_keywords:
+        if kw in name_lower:
+            idx = name_lower.find(kw)
+            words = product_name[idx:].split()
+            cleaned = " ".join(words[:3])
+            return cleaned.rstrip(",.-/ ")
+
+    # 2. Nếu không khớp từ khóa đặc biệt nào, lấy 5 từ đầu tiên của tên sản phẩm
+    words = product_name.split()
+    if len(words) > 5:
+        return " ".join(words[:5]).rstrip(",.-/ ")
+    return product_name
+
+
+def build_auto_prompt(product_name: str, product_description: str | None = None) -> str:
+    prod_type = determine_product_type(product_name)
+    cleaned_name = clean_product_name(product_name)
+    
+    # Chuẩn bị thông tin chi tiết sản phẩm nếu có để đưa vào prompt
+    detail_prompt = ""
+    if product_description:
+        clean_desc = " ".join(product_description.split())
+        detail_prompt = f" Focus the showcase on these details and features: {clean_desc[:250]}."
+
+    # Kiểm tra xem sản phẩm có phải cho nam giới không
+    name_lower = product_name.lower()
+    desc_lower = (product_description or "").lower()
+    name_for_check = name_lower.replace("việt nam", "").replace("vietnam", "").replace("viet nam", "")
+    desc_for_check = desc_lower.replace("việt nam", "").replace("vietnam", "").replace("viet nam", "")
+    is_male = False
+    import re
+    for word in ["nam", "men", "man", "mens", "con trai", "mr", "gentleman", "gentlemen"]:
+        if re.search(r'\b' + re.escape(word) + r'\b', name_for_check) or re.search(r'\b' + re.escape(word) + r'\b', desc_for_check):
+            is_male = True
+            break
+
+    model_gender = "male model" if is_male else "female model"
+
+    if prod_type == "clothing":
+        logger.info(f"👕 Sản phẩm thuộc nhóm Thời trang. Áp dụng prompt Review chi tiết sản phẩm.")
+        return (
+            f"A high-quality fashion showcase video, 9:16 vertical ratio, cinematic aesthetic style. "
+            f"Product: '{cleaned_name}' fashion item (use the uploaded reference image).{detail_prompt} "
+            f"Show a {model_gender} wearing the outfit and walking in a bright, clean, aesthetic room. "
+            "Video style: Focus on the design, fabric texture, seams, fit, and movement of the clothing. "
+            "Camera movement: smooth handheld, close-up shots of fabric details and full-body fit shots. "
+            "No speech in the video. Silent video. No text overlays, no watermarks. Duration 10 seconds."
+        )
+    elif prod_type == "footwear":
+        logger.info(f"👟 Sản phẩm thuộc nhóm Giày dép. Áp dụng prompt Review chi tiết giày dép.")
+        return (
+            f"A high-quality footwear showcase video, 9:16 vertical ratio, cinematic aesthetic style. "
+            f"Product: '{cleaned_name}' footwear (use the uploaded reference image).{detail_prompt} "
+            "Show the shoes in a clean, modern, aesthetic setting. "
+            "Video style: Focus on the design details, texture, sole, and style of the footwear. "
+            "Camera movement: smooth close-up shots of the shoe features. "
+            "No speech in the video. Silent video. No text overlays, no watermarks. Duration 10 seconds."
+        )
+    else:
+        logger.info(f"📦 Sản phẩm thuộc nhóm Đồ vật/Khác. Áp dụng prompt Review chi tiết sản phẩm.")
+        return (
+            f"A high-quality product presentation video, 9:16 vertical ratio, cinematic aesthetic style. "
+            f"Product: '{cleaned_name}' (use the uploaded reference image).{detail_prompt} "
+            "Show the product features and quality in a bright, clean, modern room. "
+            "Video style: Demonstration of the product utility and details. "
+            "Camera movement: smooth focused close-ups of the product. "
+            "No speech in the video. Silent video. No text overlays, no watermarks. Duration 10 seconds."
+        )
+
+
 
 
 # ─────────────────────────────────────────────────────────────
-# Lệnh 5: Chạy full pipeline tự động (Gemini -> TikTok)
+# Lệnh 5: Chạy full pipeline tự động (Kling AI / Gemini -> TikTok)
 # ─────────────────────────────────────────────────────────────
 @cli.command("run-pipeline")
 def run_pipeline():
-    """Tự động: Gửi prompt render video ở Gemini -> Tải về -> Đăng TikTok & gán sản phẩm tương ứng"""
+    """Tự động: Render video (Kling AI hoặc Gemini) -> Tải về -> Đăng TikTok & gán sản phẩm"""
     import json
-    from src.google_cookie_manager import GoogleCookieManager
-    from src.gemini_generator import GeminiVideoGenerator
 
     config = load_config(CONFIG_PATH)
+
+    # Force use of Gemini engine for video generation (Kling removed)
+    video_engine = "gemini"
+    from src.google_cookie_manager import GoogleCookieManager
+    from src.gemini_generator import GeminiVideoGenerator
+    google_manager = GoogleCookieManager(GOOGLE_COOKIES_PATH)
+    logger.info("🤖 Sử dụng engine: Google Gemini (Kling đã được loại bỏ)")
 
     # Đọc danh sách công việc cần làm
     jobs_path = Path(JOBS_PATH)
@@ -186,10 +371,10 @@ def run_pipeline():
     with open(jobs_path, "r", encoding="utf-8") as f:
         jobs = json.load(f)
 
-    # Dọn dẹp các video cũ trong thư mục videos/ để giải phóng dung lượng
+    # Dọn dẹp các video cũ trong thư mục videos/
     videos_dir = Path(VIDEOS_DIR)
     if videos_dir.exists():
-        logger.info("🧹 Đang dọn dẹp các video cũ trong thư mục videos/ để giải phóng dung lượng...")
+        logger.info("🧹 Đang dọn dẹp các video cũ trong thư mục videos/...")
         for item in videos_dir.iterdir():
             if item.is_file() and item.name.endswith(".mp4"):
                 try:
@@ -199,7 +384,6 @@ def run_pipeline():
 
     logger.info(f"📋 Bắt đầu pipeline với {len(jobs)} công việc.")
 
-    google_manager = GoogleCookieManager(GOOGLE_COOKIES_PATH)
     tiktok_manager = CookieManager(COOKIES_PATH)
 
     for idx, job in enumerate(jobs, 1):
@@ -215,6 +399,7 @@ def run_pipeline():
         logger.info(f"\n🚀 [Dự án #{idx}/{len(jobs)}] Đang xử lý sản phẩm...")
 
         temp_image_path = None
+        product_description = None
         
         # --- BƯỚC 0: Nếu có product_url, tự động cào ảnh sản phẩm và tên sản phẩm ---
         if product_url:
@@ -227,7 +412,7 @@ def run_pipeline():
                         playwright, headless=config.get("headless", False)
                     )
                     page = context.new_page()
-                    scraped_name, temp_image_path = scrape_tiktok_product(page, product_url)
+                    scraped_name, temp_image_path, product_description = scrape_tiktok_product(page, product_url)
                     
                     # Cập nhật thông tin nếu crawl thành công
                     if scraped_name and not product_name:
@@ -244,53 +429,89 @@ def run_pipeline():
 
         # Tự động sinh Prompt nếu chọn "auto" hoặc để trống
         if not prompt or prompt.lower() == "auto":
-            default_prompt = config.get("default_prompt_template", "Create a 5-second cinematic promo video for '{product_name}'.")
-            prompt = default_prompt.format(product_name=product_name)
+            prompt = build_auto_prompt(product_name, product_description)
             
         # Tự động sinh Caption nếu chọn "auto" hoặc để trống
         if not caption or caption.lower() == "auto":
-            default_caption = config.get("default_caption_template", "🔥 {product_name} cực hot đã có mặt tại giỏ hàng! #{product_hashtag}")
-            product_hashtag = make_hashtag(product_name)
-            caption = default_caption.format(product_name=product_name, product_hashtag=product_hashtag)
+            caption = generate_seo_caption(product_name, product_description)
 
         logger.info(f"📦 Sản phẩm: {product_name}")
-        logger.info(f"✍️ Prompt sinh video: {prompt}")
         logger.info(f"📝 Caption đăng bài: {caption}")
         
         video_path = None
         
-        # --- BƯỚC 1 & 2: Mở Gemini, gửi prompt kèm ảnh và tải video ---
+        # --- BƯỚC 1 & 2: Render video ---
+        # Gemini engine (Kling đã được loại bỏ)
         logger.info("🤖 Bắt đầu render video qua Google Gemini...")
-        try:
-            with sync_playwright() as playwright:
-                browser, context = google_manager.load_context_with_cookies(
-                    playwright, headless=config.get("headless", False)
-                )
-                page = context.new_page()
-                generator = GeminiVideoGenerator(page, config)
-                
-                generator.open_gemini()
-                video_path = generator.generate_video(prompt, image_path=temp_image_path)
-                
-                # Tự động lưu lại cookie mới (đã rotate) để giữ session Google luôn sống
+        num_segments = job.get("video_segments", 1)
+        if num_segments > 1:
+            logger.info(f"🎬 Chế độ multi-segment: sẽ render {num_segments} clip rồi ghép lại.")
+            
+        render_success = False
+        max_account_rotations = 10
+        
+        for rot_idx in range(max_account_rotations):
+            browser = None
+            context = None
+            try:
+                with sync_playwright() as playwright:
+                    browser, context = google_manager.load_context_with_cookies(
+                        playwright, headless=config.get("headless", False)
+                    )
+                    page = context.new_page()
+                    generator = GeminiVideoGenerator(page, config)
+                    generator.open_gemini()
+                    if num_segments > 1:
+                        video_path = generator.generate_multi_segment_video(
+                            prompt,
+                            product_name=product_name,
+                            image_path=temp_image_path,
+                            num_segments=num_segments,
+                            product_description=product_description,
+                        )
+                    else:
+                        video_path = generator.generate_video(prompt, image_path=temp_image_path, product_name=product_name)
+                    
+                    try:
+                        updated_cookies = context.cookies()
+                        from src.utils import save_cookies
+                        save_cookies(updated_cookies, google_manager.cookies_path)
+                        logger.info("💾 Đã tự động cập nhật Google cookies xoay vòng mới nhất.")
+                    except Exception as ce:
+                        logger.warning(f"⚠️ Không thể lưu cập nhật Google cookies: {ce}")
+                    
+                    render_success = True
+                    break
+            except Exception as e:
+                err_str = str(e)
+                is_expired = "GEMINI_DAILY_LIMIT_EXCEEDED" in err_str or "session hết hạn" in err_str or "chưa đăng nhập" in err_str
+                if is_expired:
+                    logger.warning(f"⚠️ Tài khoản Google hiện tại hết hạn hoặc hết giới hạn tạo video: {e}")
+                    rotated = google_manager.rotate_account()
+                    if rotated:
+                        logger.info("🔄 Đang thử lại với tài khoản Google tiếp theo...")
+                        continue
+                    else:
+                        logger.error("❌ Không còn tài khoản Google dự phòng nào khác trong thư mục cookies/google_accounts/!")
+                        break
+                else:
+                    logger.error(f"❌ Lỗi khi render video từ Gemini: {e}")
+                    break
+            finally:
                 try:
-                    updated_cookies = context.cookies()
-                    from src.utils import save_cookies
-                    save_cookies(updated_cookies, google_manager.cookies_path)
-                    logger.info("💾 Đã tự động cập nhật Google cookies xoay vòng mới nhất.")
-                except Exception as ce:
-                    logger.warning(f"⚠️ Không thể lưu cập nhật Google cookies: {ce}")
-                
-                context.close()
-                browser.close()
-        except Exception as e:
-            logger.error(f"❌ Lỗi khi render video từ Gemini: {e}")
-            # Dọn dẹp ảnh tạm
+                    if context:
+                        context.close()
+                    if browser:
+                        browser.close()
+                except Exception:
+                    pass
+
+        if not render_success:
             if temp_image_path and Path(temp_image_path).exists():
                 os.remove(temp_image_path)
             continue
 
-        # Dọn dẹp ảnh tạm sau khi Gemini đã nhận
+        # Dọn dẹp ảnh tạm
         if temp_image_path and Path(temp_image_path).exists():
             try:
                 os.remove(temp_image_path)
@@ -301,6 +522,39 @@ def run_pipeline():
         if not video_path or not Path(video_path).exists():
             logger.error("❌ Không lấy được file video, chuyển sang dự án tiếp theo.")
             continue
+
+        # --- BƯỚC HẬU KỲ: Xử lý âm thanh và thuyết minh (TTS) ---
+        from src.utils import get_bg_music_track, replace_video_audio, add_voiceover_to_video
+        
+        bg_music = get_bg_music_track(config.get("bg_music"))
+        if bg_music:
+            logger.info(f"🎵 Phát hiện nhạc nền tùy chỉnh: {bg_music}")
+            processed_video_name = f"processed_{Path(video_path).name}"
+            processed_video_path = str(Path(video_path).parent / processed_video_name)
+            
+            if config.get("voiceover", False):
+                logger.info("🎙️ Chế độ Voiceover bật: Tiến hành mix giọng thuyết minh và nhạc nền mới...")
+                # Thay nhạc nền trước
+                replaced_audio_path = replace_video_audio(video_path, bg_music, processed_video_path)
+                # Sau đó chèn giọng thuyết minh đè lên nhạc nền
+                final_processed_path = str(Path(video_path).parent / f"final_tts_{Path(video_path).name}")
+                video_path = add_voiceover_to_video(replaced_audio_path, caption, final_processed_path)
+                # Xóa file trung gian
+                if Path(replaced_audio_path).exists() and replaced_audio_path != video_path:
+                    try:
+                        os.remove(replaced_audio_path)
+                    except Exception:
+                        pass
+            else:
+                video_path = replace_video_audio(video_path, bg_music, processed_video_path)
+        else:
+            if config.get("voiceover", False):
+                logger.info("🎙️ Chỉ bật Voiceover (không có nhạc nền tùy chỉnh): Đang chèn thuyết minh...")
+                processed_video_name = f"tts_{Path(video_path).name}"
+                processed_video_path = str(Path(video_path).parent / processed_video_name)
+                video_path = add_voiceover_to_video(video_path, caption, processed_video_path)
+            else:
+                logger.info(f"🎥 Sử dụng trực tiếp video gốc từ Gemini (giữ nguyên âm thanh): {video_path}")
 
         # --- BƯỚC 3 & 4: Upload lên TikTok và gán link sản phẩm ---
         logger.info("📤 Đang tiến hành upload video và gán link lên TikTok...")
@@ -319,8 +573,7 @@ def run_pipeline():
                 )
 
                 if success:
-                    logger.info("🔔 Trình duyệt sẽ được giữ lại để bạn tự tay chọn sản phẩm và Đăng video.")
-                    input("⌨️ Nhấn ENTER tại cửa sổ terminal này để đóng trình duyệt và chuyển sang dự án tiếp theo...")
+                    logger.info(f"🎉 Đăng video thành công tự động cho dự án #{idx}!")
 
                 # Tự động lưu lại cookie TikTok mới (đã rotate) để duy trì session đăng nhập
                 try:
@@ -344,6 +597,29 @@ def run_pipeline():
                             logger.info(f"🗑️ Đã xóa video đã đăng để giải phóng dung lượng: {p_vid.name}")
                     except Exception as e:
                         logger.warning(f"⚠️ Không thể xóa video: {e}")
+
+                    # Xóa job thành công khỏi jobs.json
+                    try:
+                        if jobs_path.exists():
+                            with open(jobs_path, "r", encoding="utf-8") as f:
+                                current_jobs = json.load(f)
+                            
+                            updated_jobs = []
+                            removed = False
+                            for c_job in current_jobs:
+                                if (not removed 
+                                    and c_job.get("product_url") == job.get("product_url") 
+                                    and c_job.get("product_name") == job.get("product_name") 
+                                    and c_job.get("prompt") == job.get("prompt")):
+                                    removed = True
+                                    continue
+                                updated_jobs.append(c_job)
+                            
+                            with open(jobs_path, "w", encoding="utf-8") as f:
+                                json.dump(updated_jobs, f, indent=2, ensure_ascii=False)
+                            logger.info("🗑️ Đã xóa job thành công khỏi jobs.json")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Không thể cập nhật jobs.json: {e}")
                 else:
                     logger.error(f"❌ Đăng video thất bại cho dự án #{idx}.")
         except Exception as e:
