@@ -65,33 +65,85 @@ def scrape_tiktok_product(page: Page, product_url: str) -> tuple[str | None, str
         try:
             js_get_desc = """
             () => {
-                // Thử các selector phổ biến cho phần mô tả TikTok Shop
-                const descSelectors = [
-                    '[class*="description"]',
-                    '[class*="Description"]',
-                    '[class*="product-detail"]',
-                    '[class*="ProductDetail"]',
-                    '[class*="detail-content"]',
-                    '[class*="spec"]',
-                    '[class*="Spec"]',
-                    '[class*="attribute"]',
-                    '[class*="overview"]'
+                const selectors = [
+                    '[class*="description"]', '[class*="Description"]',
+                    '[class*="desc"]', '[class*="Desc"]',
+                    '[class*="product-detail"]', '[class*="ProductDetail"]',
+                    '[class*="detail-content"]', '[class*="detail"]', '[class*="Detail"]',
+                    '[class*="spec"]', '[class*="Spec"]',
+                    '[class*="attribute"]', '[class*="Attribute"]',
+                    '[class*="overview"]', '[class*="Overview"]',
+                    '[class*="info"]', '[class*="Info"]',
+                    '#product-description', '#description', '.description',
+                    'div'
                 ];
+
+                let candidates = [];
                 
-                let bestText = '';
-                for (const sel of descSelectors) {
-                    const els = document.querySelectorAll(sel);
-                    for (const el of els) {
-                        const text = (el.innerText || el.textContent || '').trim();
-                        // Lấy đoạn text dài nhất, loại bỏ những đoạn quá ngắn hoặc là bảng size
-                        if (text.length > bestText.length && text.length < 2000 
-                            && !text.toLowerCase().includes('size chart')
-                            && !text.toLowerCase().includes('bảng size')) {
-                            bestText = text;
+                for (const sel of selectors) {
+                    try {
+                        const els = document.querySelectorAll(sel);
+                        for (const el of els) {
+                            if (!el || !el.innerText) continue;
+                            const text = el.innerText.trim();
+                            if (text.length < 20 || text.length > 3000) continue;
+                            
+                            // Tính điểm cho ứng viên
+                            let score = text.length; // Điểm cơ bản dựa trên độ dài
+                            
+                            const className = (el.className || '').toString().toLowerCase();
+                            const idName = (el.id || '').toString().toLowerCase();
+                            const parentClassName = el.parentElement ? (el.parentElement.className || '').toString().toLowerCase() : '';
+                            
+                            // Tăng điểm nếu class/id chứa keyword mô tả tốt
+                            if (className.includes('description') || idName.includes('description')) score += 500;
+                            if (className.includes('detail') || idName.includes('detail')) score += 300;
+                            if (className.includes('spec') || idName.includes('spec')) score += 200;
+                            
+                            // Trừ điểm nặng nếu class/id liên quan đến gallery/media/carousel/nav/header/footer/pagination/counter
+                            const badKeywords = [
+                                'gallery', 'carousel', 'swiper', 'slider', 'image', 'photo', 'picture', 'media',
+                                'indicator', 'bullet', 'dot', 'pagination', 'counter', 'banner', 'header', 'footer',
+                                'nav', 'menu', 'recommend', 'similar', 'suggest', 'related', 'comment', 'review',
+                                'feedback', 'user', 'author', 'seller', 'shop', 'share', 'button', 'btn', 'popup',
+                                'dialog', 'modal', 'overlay'
+                            ];
+                            
+                            for (const kw of badKeywords) {
+                                if (className.includes(kw) || idName.includes(kw) || parentClassName.includes(kw)) {
+                                    score -= 800;
+                                }
+                            }
+                            
+                            // Trừ điểm nếu text chứa các chuỗi pagination như "1 / 8" hoặc "1 of 8"
+                            const pageRegex = /\\d+\\s*[\\/\\-of]\\s*\\d+/gi;
+                            const pageMatches = text.match(pageRegex);
+                            if (pageMatches && pageMatches.length > 1) {
+                                score -= 600;
+                            }
+                            // Nếu toàn bộ text chỉ là số và ký tự phân tách
+                            if (/^[\\d\\s\\/\\-\\|\\:\\.\\,\\(\\)\\*of]+$/.test(text)) {
+                                score -= 1000;
+                            }
+                            
+                            // Trừ điểm nếu là các từ thông dụng của bảng size
+                            if (text.toLowerCase().includes('size chart') || text.toLowerCase().includes('bảng size')) {
+                                score -= 400;
+                            }
+                            
+                            candidates.push({ element: el, text: text, score: score });
                         }
-                    }
+                    } catch (e) {}
                 }
-                return bestText || null;
+                
+                if (candidates.length === 0) return null;
+                
+                // Sắp xếp giảm dần theo điểm
+                candidates.sort((a, b) => b.score - a.score);
+                
+                // Trả về văn bản của ứng viên điểm cao nhất
+                const bestCandidate = candidates[0];
+                return bestCandidate.score > 0 ? bestCandidate.text : null;
             }
             """
             raw_desc = page.evaluate(js_get_desc)

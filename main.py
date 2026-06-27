@@ -43,9 +43,18 @@ def cli():
 # Lệnh 1: Export cookies TikTok (chỉ cần chạy 1 lần)
 # ─────────────────────────────────────────────────────────────
 @cli.command("export-cookies")
-def export_cookies():
+@click.option("--account", default="", help="Tên tài khoản TikTok (ví dụ: acc1, acc2)")
+def export_cookies(account):
     """Mở trình duyệt để đăng nhập TikTok và lưu cookies"""
-    manager = CookieManager(COOKIES_PATH)
+    if account:
+        if not account.endswith(".json"):
+            path = f"./cookies/tiktok_accounts/{account}.json"
+        else:
+            path = f"./cookies/tiktok_accounts/{account}"
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+    else:
+        path = COOKIES_PATH
+    manager = CookieManager(path)
     manager.export_cookies_interactively()
 
 
@@ -53,10 +62,24 @@ def export_cookies():
 # Lệnh 2: Export cookies Google/Gemini (chỉ cần chạy 1 lần)
 # ─────────────────────────────────────────────────────────────
 @cli.command("export-google-cookies")
-def export_google_cookies():
+@click.option("--account", default="", help="Tên tài khoản Google (ví dụ: acc1, acc2)")
+def export_google_cookies(account):
     """Mở trình duyệt để đăng nhập Google/Gemini và lưu cookies"""
     from src.google_cookie_manager import GoogleCookieManager
-    manager = GoogleCookieManager(GOOGLE_COOKIES_PATH)
+    if account:
+        if not account.endswith(".json"):
+            path = f"./cookies/google_accounts/{account}.json"
+        else:
+            path = f"./cookies/google_accounts/{account}"
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        # Khởi tạo file trống [] nếu chưa tồn tại
+        target_path = Path(path)
+        if not target_path.exists() or target_path.stat().st_size == 0:
+            with open(target_path, "w", encoding="utf-8") as f:
+                f.write("[]")
+    else:
+        path = GOOGLE_COOKIES_PATH
+    manager = GoogleCookieManager(path)
     manager.export_cookies_interactively()
 
 
@@ -278,12 +301,12 @@ def clean_product_name(product_name: str) -> str:
             idx = name_lower.find(kw)
             words = product_name[idx:].split()
             cleaned = " ".join(words[:3])
-            return cleaned.rstrip(",.-/ ")
+            return cleaned.rstrip(",.-/()[]{} ")
 
     # 2. Nếu không khớp từ khóa đặc biệt nào, lấy 5 từ đầu tiên của tên sản phẩm
     words = product_name.split()
     if len(words) > 5:
-        return " ".join(words[:5]).rstrip(",.-/ ")
+        return " ".join(words[:5]).rstrip(",.-/()[]{} ")
     return product_name
 
 
@@ -345,6 +368,40 @@ def build_auto_prompt(product_name: str, product_description: str | None = None)
 
 
 
+def update_job_in_file(jobs_path: Path, target_job: dict, status: str, error_msg: str | None = None):
+    """Cập nhật trạng thái và lỗi của job trực tiếp trong file jobs.json"""
+    import json
+    try:
+        if not jobs_path.exists():
+            return
+        with open(jobs_path, "r", encoding="utf-8") as f:
+            current_jobs = json.load(f)
+        
+        updated = False
+        for c_job in current_jobs:
+            if (c_job.get("product_url") == target_job.get("product_url") 
+                and c_job.get("product_name") == target_job.get("product_name") 
+                and c_job.get("prompt") == target_job.get("prompt")):
+                c_job["status"] = status
+                if status == "failed":
+                    c_job["success"] = False
+                else:
+                    c_job.pop("success", None)
+                
+                if error_msg:
+                    c_job["error_msg"] = error_msg
+                else:
+                    c_job.pop("error_msg", None)
+                updated = True
+                break
+        
+        if updated:
+            with open(jobs_path, "w", encoding="utf-8") as f:
+                json.dump(current_jobs, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        logger.warning(f"⚠️ Không thể cập nhật trạng thái job trong jobs.json: {e}")
+
+
 # ─────────────────────────────────────────────────────────────
 # Lệnh 5: Chạy full pipeline tự động (Kling AI / Gemini -> TikTok)
 # ─────────────────────────────────────────────────────────────
@@ -391,10 +448,30 @@ def run_pipeline():
         product_name = job.get("product_name")
         product_url = job.get("product_url")
         caption = job.get("caption")
+        tiktok_account = job.get("tiktok_account")
+
+        # Xác định tài khoản TikTok cho job này
+        if tiktok_account:
+            if not tiktok_account.endswith(".json"):
+                tiktok_cookies_file = f"./cookies/tiktok_accounts/{tiktok_account}.json"
+            else:
+                tiktok_cookies_file = f"./cookies/tiktok_accounts/{tiktok_account}"
+            
+            if Path(tiktok_cookies_file).exists():
+                job_tiktok_manager = CookieManager(tiktok_cookies_file)
+                logger.info(f"👥 Sử dụng tài khoản TikTok: {tiktok_account} ({tiktok_cookies_file})")
+            else:
+                logger.warning(f"⚠️ Không tìm thấy file cookies cho TikTok account '{tiktok_account}' tại {tiktok_cookies_file}. Dùng mặc định.")
+                job_tiktok_manager = tiktok_manager
+        else:
+            job_tiktok_manager = tiktok_manager
 
         if not product_name and not product_url:
-            logger.warning(f"⚠️ Công việc #{idx} thiếu cả product_name và product_url, bỏ qua.")
+            logger.warning(f"⚠️ Công việc #{idx} thiếu cả product_name và product_url, bỏ quan.")
             continue
+
+        # Đánh dấu đang xử lý và reset trạng thái cũ (nếu có)
+        update_job_in_file(jobs_path, job, "processing")
 
         logger.info(f"\n🚀 [Dự án #{idx}/{len(jobs)}] Đang xử lý sản phẩm...")
 
@@ -408,7 +485,7 @@ def run_pipeline():
                 from src.product_scraper import scrape_tiktok_product
                 with sync_playwright() as playwright:
                     # Mở bằng cookies TikTok để vào được TikTok Shop không bị block
-                    browser, context = tiktok_manager.load_context_with_cookies(
+                    browser, context = job_tiktok_manager.load_context_with_cookies(
                         playwright, headless=config.get("headless", False)
                     )
                     page = context.new_page()
@@ -448,7 +525,7 @@ def run_pipeline():
             logger.info(f"🎬 Chế độ multi-segment: sẽ render {num_segments} clip rồi ghép lại.")
             
         render_success = False
-        max_account_rotations = 10
+        max_account_rotations = google_manager.get_accounts_count()
         
         for rot_idx in range(max_account_rotations):
             browser = None
@@ -461,6 +538,7 @@ def run_pipeline():
                     page = context.new_page()
                     generator = GeminiVideoGenerator(page, config)
                     generator.open_gemini()
+                    google_manager.mark_session_ready()
                     if num_segments > 1:
                         video_path = generator.generate_multi_segment_video(
                             prompt,
@@ -474,9 +552,7 @@ def run_pipeline():
                     
                     try:
                         updated_cookies = context.cookies()
-                        from src.utils import save_cookies
-                        save_cookies(updated_cookies, google_manager.cookies_path)
-                        logger.info("💾 Đã tự động cập nhật Google cookies xoay vòng mới nhất.")
+                        google_manager.save_active_cookies(updated_cookies)
                     except Exception as ce:
                         logger.warning(f"⚠️ Không thể lưu cập nhật Google cookies: {ce}")
                     
@@ -487,13 +563,20 @@ def run_pipeline():
                 is_expired = "GEMINI_DAILY_LIMIT_EXCEEDED" in err_str or "session hết hạn" in err_str or "chưa đăng nhập" in err_str
                 if is_expired:
                     logger.warning(f"⚠️ Tài khoản Google hiện tại hết hạn hoặc hết giới hạn tạo video: {e}")
+                    
+                    if rot_idx == max_account_rotations - 1:
+                        logger.error("❌ Đã thử hết tất cả các tài khoản Google mà không thành công!")
+                        update_job_in_file(jobs_path, job, "failed", "Hết tất cả tài khoản Google/Gemini để xoay vòng")
+                        raise click.ClickException("Hết tất cả tài khoản Google/Gemini để xoay vòng. Dừng chương trình.")
+                    
                     rotated = google_manager.rotate_account()
                     if rotated:
                         logger.info("🔄 Đang thử lại với tài khoản Google tiếp theo...")
                         continue
                     else:
                         logger.error("❌ Không còn tài khoản Google dự phòng nào khác trong thư mục cookies/google_accounts/!")
-                        break
+                        update_job_in_file(jobs_path, job, "failed", "Hết tất cả tài khoản Google/Gemini để xoay vòng")
+                        raise click.ClickException("Hết tất cả tài khoản Google/Gemini để xoay vòng. Dừng chương trình.")
                 else:
                     logger.error(f"❌ Lỗi khi render video từ Gemini: {e}")
                     break
@@ -509,6 +592,7 @@ def run_pipeline():
         if not render_success:
             if temp_image_path and Path(temp_image_path).exists():
                 os.remove(temp_image_path)
+            update_job_in_file(jobs_path, job, "failed", "Lỗi render video từ Gemini")
             continue
 
         # Dọn dẹp ảnh tạm
@@ -521,6 +605,7 @@ def run_pipeline():
 
         if not video_path or not Path(video_path).exists():
             logger.error("❌ Không lấy được file video, chuyển sang dự án tiếp theo.")
+            update_job_in_file(jobs_path, job, "failed", "Không tìm thấy file video đã render hoặc lỗi hậu kỳ")
             continue
 
         # --- BƯỚC HẬU KỲ: Xử lý âm thanh và thuyết minh (TTS) ---
@@ -560,7 +645,7 @@ def run_pipeline():
         logger.info("📤 Đang tiến hành upload video và gán link lên TikTok...")
         try:
             with sync_playwright() as playwright:
-                browser, context = tiktok_manager.load_context_with_cookies(
+                browser, context = job_tiktok_manager.load_context_with_cookies(
                     playwright, headless=config.get("headless", False)
                 )
                 page = context.new_page()
@@ -579,7 +664,7 @@ def run_pipeline():
                 try:
                     updated_cookies = context.cookies()
                     from src.utils import save_cookies
-                    save_cookies(updated_cookies, tiktok_manager.cookies_path)
+                    save_cookies(updated_cookies, job_tiktok_manager.cookies_path)
                     logger.info("💾 Đã tự động cập nhật TikTok cookies xoay vòng mới nhất.")
                 except Exception as ce:
                     logger.warning(f"⚠️ Không thể lưu cập nhật TikTok cookies: {ce}")
@@ -622,8 +707,10 @@ def run_pipeline():
                         logger.warning(f"⚠️ Không thể cập nhật jobs.json: {e}")
                 else:
                     logger.error(f"❌ Đăng video thất bại cho dự án #{idx}.")
+                    update_job_in_file(jobs_path, job, "failed", "Đăng video lên TikTok thất bại")
         except Exception as e:
             logger.error(f"❌ Lỗi trong quá trình push TikTok: {e}")
+            update_job_in_file(jobs_path, job, "failed", f"Lỗi push TikTok: {str(e)}")
 
 
 if __name__ == "__main__":

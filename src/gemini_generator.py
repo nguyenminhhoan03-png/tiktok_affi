@@ -60,6 +60,60 @@ class GeminiVideoGenerator:
         except Exception:
             pass
 
+    def _click_send_button(self) -> None:
+        """Tìm và bấm nút gửi tin nhắn một cách thông minh, loại trừ nút Feedback/Phản hồi."""
+        selectors = [
+            'button[aria-label="Send message"]',
+            'button[aria-label="Gửi tin nhắn"]',
+            'button[aria-label*="Send"]:visible',
+            'button[aria-label*="Gửi"]:visible',
+            '.send-button:visible',
+            'button[class*="send-button"]:visible'
+        ]
+        
+        send_btn = None
+        for sel in selectors:
+            try:
+                loc = self.page.locator(sel)
+                count = loc.count()
+                for i in range(count):
+                    btn = loc.nth(i)
+                    label = (btn.get_attribute("aria-label") or "").lower()
+                    # Bỏ qua nếu là nút feedback / phản hồi
+                    if "feedback" in label or "phản hồi" in label:
+                        continue
+                    if btn.is_visible():
+                        send_btn = btn
+                        break
+                if send_btn:
+                    break
+            except Exception:
+                continue
+                
+        if send_btn:
+            try:
+                send_btn.click(timeout=3000)
+                logger.info("✅ Đã bấm nút gửi thành công!")
+            except Exception:
+                logger.warning("⚠️ Không thể click bình thường vào nút gửi, dùng JS click...")
+                try:
+                    send_btn.evaluate("el => el.click()")
+                    logger.info("✅ Đã bấm nút gửi bằng JS thành công!")
+                except Exception as e:
+                    logger.error(f"❌ Thất bại khi bấm nút gửi bằng JS: {e}")
+                    raise e
+        else:
+            logger.warning("⚠️ Không tìm thấy nút gửi qua bộ lọc thông minh, thử dùng selector mặc định...")
+            fallback_btn = self.page.locator(
+                'button[aria-label*="Send"], button[aria-label*="Gửi"], button[class*="send-button"]'
+            ).first
+            try:
+                fallback_btn.click(timeout=3000)
+                logger.info("✅ Đã bấm nút gửi (fallback) thành công!")
+            except Exception:
+                fallback_btn.evaluate("el => el.click()")
+                logger.info("✅ Đã bấm nút gửi (fallback JS) thành công!")
+
     def open_gemini(self) -> None:
         logger.info("🌐 Mở Google Gemini App...")
         try:
@@ -69,29 +123,46 @@ class GeminiVideoGenerator:
         self._delay()
         self._close_overlays()
  
-        # Check xem đã login chưa
-        is_logged_in = True
-        try:
-            self.page.wait_for_selector(
-                'div[contenteditable="true"], textarea, div[class*="ql-editor"]',
-                timeout=20000
-            )
+        # Check xem đã login chưa — thử tối đa 2 lần (lần 2 reload lại trang)
+        max_login_checks = 2
+        is_logged_in = False
+        
+        for check_idx in range(max_login_checks):
+            is_logged_in = True
+            try:
+                self.page.wait_for_selector(
+                    'div[contenteditable="true"], textarea, div[class*="ql-editor"]',
+                    timeout=20000
+                )
+                
+                # Kiểm tra xem có nút "Sign in" hoặc "Đăng nhập" hiển thị trên màn hình không
+                sign_in_visible = False
+                for btn in self.page.locator('button, a, div[role="button"]').all():
+                    try:
+                        text = (btn.text_content() or "").strip().lower()
+                        if text in ["sign in", "đăng nhập"] and btn.is_visible():
+                            sign_in_visible = True
+                            break
+                    except Exception:
+                        pass
+                
+                if sign_in_visible:
+                    is_logged_in = False
+            except Exception as e:
+                is_logged_in = False
             
-            # Kiểm tra xem có nút "Sign in" hoặc "Đăng nhập" hiển thị trên màn hình không
-            sign_in_visible = False
-            for btn in self.page.locator('button, a, div[role="button"]').all():
+            if is_logged_in:
+                break
+            
+            # Nếu chưa login và còn lần thử, reload trang
+            if check_idx < max_login_checks - 1:
+                logger.warning("⚠️ Chưa phát hiện đăng nhập, thử reload lại trang Gemini...")
                 try:
-                    text = (btn.text_content() or "").strip().lower()
-                    if text in ["sign in", "đăng nhập"] and btn.is_visible():
-                        sign_in_visible = True
-                        break
+                    self.page.reload(wait_until="load", timeout=30000)
                 except Exception:
                     pass
-            
-            if sign_in_visible:
-                is_logged_in = False
-        except Exception as e:
-            is_logged_in = False
+                self._delay()
+                self._close_overlays()
             
         if not is_logged_in:
             logger.error("❌ Không tìm thấy thông tin đăng nhập của Gemini. Có thể cookies đã hết hạn hoặc chưa đăng nhập!")
@@ -279,15 +350,8 @@ class GeminiVideoGenerator:
             ).count()
 
             # Bấm nút gửi (send button)
-            send_btn = self.page.locator(
-                'button[aria-label*="Send"], button[aria-label*="Gửi"], button[class*="send-button"]'
-            ).first
-            try:
-                send_btn.click(timeout=5000)
-            except Exception:
-                logger.warning("⚠️ Không thể click bình thường vào send button, dùng JavaScript click...")
-                send_btn.evaluate("el => el.click()")
             logger.info("⏳ Đang gửi yêu cầu tạo video...")
+            self._click_send_button()
             self._delay()
 
             # Đợi render video
@@ -314,7 +378,7 @@ class GeminiVideoGenerator:
                 # Kiểm tra bộ lọc an toàn và giới hạn sau 10 giây (chỉ check khi không có video mới và ĐÃ XUẤT HIỆN BONG BÓNG CHAT MỚI)
                 if not has_new_video and time.time() - start_time > 10:
                     current_responses = self.page.locator(
-                        'message-content, [data-test-id="response-container"], .model-response, .message-content'
+                        'message-content, [data-test-id="response-container"], .model-response, .message-content, [role="alert"], .inline-alert, .error-message'
                     )
                     if current_responses.count() > initial_response_count:
                         latest_text = (current_responses.nth(current_responses.count() - 1).text_content() or "").strip()
@@ -487,13 +551,21 @@ class GeminiVideoGenerator:
         """Kiểm tra xem Gemini có báo hết lượt tạo video trong ngày không."""
         daily_limit_keywords = [
             "can't generate more videos for you today",
+            "cannot generate more videos for you today",
+            "can't generate any more videos for you today",
+            "cannot generate any more videos for you today",
             "come back tomorrow",
             "reached your daily limit",
+            "reached the daily limit",
+            "daily limit for video",
             "hết lượt tạo video",
+            "không thể tạo thêm video",
             "quay lại vào ngày mai",
             "hẹn gặp lại ngày mai",
             "cannot generate more videos",
             "cannot make more videos today",
+            "today, but i can still",
+            "hôm nay, nhưng tôi vẫn có thể",
         ]
         text_lower = text.lower()
         for kw in daily_limit_keywords:
@@ -524,6 +596,57 @@ class GeminiVideoGenerator:
                 
         return "other"
 
+    def _extract_useful_description(self, product_description: str | None) -> str:
+        """Trích xuất thông tin hữu ích từ mô tả sản phẩm, loại bỏ giá, rating, shipping, noise."""
+        if not product_description:
+            return ""
+        import re
+        # Loại bỏ các dòng/cụm nhiễu
+        noise_patterns = [
+            r'Free\s*shipp?ing', r'Deal', r'\d+\.\d+\s*$',  # rating like 4.8
+            r'\d+\s*sold', r'₫[\d,.]+', r'\$[\d,.]+',  # price
+            r'MUA\s*\d+\s*G[Ii][Ảả][Mm].*', r'KÈM\s*QUÀ',  # promo
+            r'Free\s*ship', r'Giảm\s*\d+',
+        ]
+        lines = product_description.split('\n')
+        useful_lines = []
+        for line in lines:
+            line = line.strip()
+            if not line or len(line) < 5:
+                continue
+            is_noise = False
+            for pat in noise_patterns:
+                if re.search(pat, line, re.IGNORECASE):
+                    is_noise = True
+                    break
+            # Bỏ dòng chỉ có số
+            if re.match(r'^[\d,.₫$%\s]+$', line):
+                is_noise = True
+            if not is_noise:
+                useful_lines.append(line)
+        # Chỉ lấy tối đa 2 dòng hữu ích nhất (tên + đặc điểm)
+        result = ' | '.join(useful_lines[:2])
+        # Giới hạn 150 ký tự để prompt không bị quá dài
+        return result[:150] if result else ""
+
+    def _pick_consistent_music(self, product_name: str) -> str:
+        """Chọn 1 bài nhạc Việt trending cụ thể dựa trên seed từ tên sản phẩm.
+        Đảm bảo tất cả segments của cùng 1 sản phẩm dùng cùng 1 bài nhạc."""
+        trending_songs = [
+            "'Waiting For You' của MONO",
+            "'See Tình' của Hoàng Thùy Linh",
+            "'Có Hẹn Với Thanh Xuân' của MONSTAR",
+            "'Ngắm Hoa Lệ Rơi' phong cách remix TikTok",
+            "'Đừng Làm Trái Tim Anh Đau' của Sơn Tùng MTP",
+            "'Em Là' của GREY D",
+            "'Là Anh' của Phạm Lịch",
+            "'Dù Cho Tận Thế' phong cách lofi chill",
+            "'Cắt Đôi Nỗi Sầu' của Tăng Duy Tân remix",
+            "'Ghé Qua' của Dick x PC",
+        ]
+        seed = sum(ord(c) for c in (product_name or "product"))
+        return trending_songs[seed % len(trending_songs)]
+
     def _clean_product_name(self, product_name: str) -> str:
         if not product_name:
             return "sản phẩm"
@@ -552,11 +675,11 @@ class GeminiVideoGenerator:
                 idx = name_lower.find(kw)
                 words = product_name[idx:].split()
                 cleaned = " ".join(words[:3])
-                return cleaned.rstrip(",.-/ ")
+                return cleaned.rstrip(",.-/()[]{} ")
 
         words = product_name.split()
         if len(words) > 5:
-            return " ".join(words[:5]).rstrip(",.-/ ")
+            return " ".join(words[:5]).rstrip(",.-/()[]{} ")
         return product_name
 
     def _determine_gender(self, product_name: str, product_description: str | None = None) -> str:
@@ -601,9 +724,147 @@ class GeminiVideoGenerator:
             "No text, no watermark. Duration 10 seconds."
         )
 
+    def _generate_tiktok_voiceover(
+        self,
+        product_name: str,
+        product_description: str | None,
+        gender: str,
+        segment_index: int,
+        total_segments: int,
+        prod_type: str
+    ) -> str:
+        """Sinh giọng đọc thuyết minh tự nhiên và đa dạng chuẩn TikTok dựa trên loại sản phẩm và giới tính."""
+        cleaned_name = self._clean_product_name(product_name)
+        
+        # Tạo seed từ tên sản phẩm để các clip của cùng sản phẩm có kịch bản nhất quán
+        seed = sum(ord(c) for c in cleaned_name)
+        
+        # Hooks (segment 0)
+        if gender == "male":
+            hooks_clothing = [
+                f"Mẫu {cleaned_name} này chất quá cả nhà ơi, chất vải mềm mịn sờ sướng tay cực kỳ!",
+                f"Review thực tế cho anh em mẫu {cleaned_name} siêu hot hit này nha, nhìn cái phom là thấy ưng rồi!",
+                f"Anh em nào đang tìm {cleaned_name} đi chơi đi làm thì bơi hết vào đây xem cận cảnh nè!",
+                f"Đúng là chân ái của anh em đây rồi, mẫu {cleaned_name} lên đồ là bao ngầu luôn!"
+            ]
+            hooks_footwear = [
+                f"Đôi {cleaned_name} chất xỉu luôn anh em ơi, lên chân bao êm bao ngầu!",
+                f"Hé lộ mẫu {cleaned_name} đang làm mưa làm gió trên TikTok, thiết kế cực kỳ thể thao!",
+                f"Cận cảnh em {cleaned_name} siêu đẹp cho anh em đây, chất da/vải siêu bền nhé!",
+                f"Lần đầu tiên thấy một đôi {cleaned_name} đẹp thế này, phom chuẩn không cần chỉnh luôn!"
+            ]
+            hooks_other = [
+                f"Món {cleaned_name} này cực kỳ xịn sò anh em ơi, thiết kế thông minh và tiện lợi lắm!",
+                f"Review thực tế em {cleaned_name} cho cả nhà, cầm trên tay chắc chắn cực kỳ!",
+                f"Anh em nào mê công nghệ/đồ tiện ích thì không thể bỏ qua em {cleaned_name} này nha!",
+                f"Unboxing siêu phẩm {cleaned_name} đang siêu hot gần đây, dùng là ghiền luôn!"
+            ]
+        else: # female
+            hooks_clothing = [
+                f"Mẫu {cleaned_name} này xinh quá cả nhà ơi, chất vải mềm mịn thích lắm luôn!",
+                f"Review thực tế cho chị em mẫu {cleaned_name} siêu hot hit này nha, mặc lên là xinh lung linh luôn!",
+                f"Chị em nào đang tìm {cleaned_name} đi chơi đi tiệc thì bơi hết vào đây xem cận cảnh nè!",
+                f"Đúng là chân ái của chị em mình đây rồi, mẫu {cleaned_name} này mặc tôn dáng dã man!"
+            ]
+            hooks_footwear = [
+                f"Đôi {cleaned_name} xinh xỉu luôn mọi người ơi, nhìn cái là mê ngay á!",
+                f"Hé lộ đôi {cleaned_name} đang làm mưa làm gió trên TikTok, hack dáng cực đỉnh luôn!",
+                f"Cận cảnh em {cleaned_name} siêu dễ thương cho chị em đây, đi êm chân lắm nhé!",
+                f"Lần đầu tiên thấy một đôi {cleaned_name} xinh thế này, phối đồ bánh bèo hay năng động đều hợp!"
+            ]
+            hooks_other = [
+                f"Món {cleaned_name} này xinh và tiện lắm mọi người ơi, nhìn cái là thích ngay luôn!",
+                f"Review thực tế em {cleaned_name} cho cả nhà, thiết kế nhỏ gọn xinh xắn lắm!",
+                f"Chị em nào thích đồ xinh xịn mịn thì không thể bỏ qua em {cleaned_name} này đâu nha!",
+                f"Unboxing siêu phẩm {cleaned_name} đang siêu hot gần đây, decor hay dùng đều mê!"
+            ]
+
+        # Mid body reviews
+        mid_clothing = [
+            "Đường kim mũi chỉ được may cực kỳ tỉ mỉ, sờ vào thấy ngay sự cao cấp.",
+            "Chất vải co giãn thoải mái, thấm hút mồ hôi tốt nên mặc cả ngày không sợ nóng bí.",
+            "Từng chi tiết cúc áo và đường viền được hoàn thiện rất tốt, phom lên chuẩn chỉ cực kỳ.",
+            "Thiết kế trẻ trung, màu sắc tôn da phối đồ siêu dễ luôn mọi người ạ."
+        ]
+        mid_footwear = [
+            "Đế giày được làm từ cao su chống trơn trượt, đi bộ hay chạy nhảy đều cực kỳ thoải mái.",
+            "Từng đường keo mũi chỉ rất chắc chắn, lớp lót bên trong êm ái bảo vệ gót chân.",
+            "Phom giày ôm chân gọn gàng, tạo cảm giác nhẹ nhàng thanh thoát khi di chuyển.",
+            "Màu sắc basic cực dễ phối đồ, đi học đi làm hay đi chơi đều nổi bật."
+        ]
+        mid_other = [
+            "Chất liệu cao cấp, độ hoàn thiện cao, dùng cực kỳ bền bỉ theo thời gian.",
+            "Tính năng thông minh giúp tiết kiệm thời gian, cực kỳ tiện lợi cho cuộc sống hàng ngày.",
+            "Màu sắc tối giản hiện đại, mang đi học đi làm hay để bàn làm việc đều rất sang.",
+            "Cầm cực kỳ đầm tay, các nút bấm và cổng kết nối hoạt động siêu mượt mà."
+        ]
+
+        # Call To Action (last segment)
+        if gender == "male":
+            ctas_clothing = [
+                f"Mặc lên phom chuẩn bao đẹp luôn anh em! Mẫu {cleaned_name} này đáng mua lắm, bấm giỏ hàng góc trái săn sale nha!",
+                f"Lên đồ cực chất mà giá lại hạt dẻ. Anh em tranh thủ chốt ngay mẫu {cleaned_name} ở giỏ hàng bên dưới nha!",
+                f"Nói chung là 10 trên 10 cực kỳ đáng tiền luôn. Link mua em {cleaned_name} ở ngay góc trái màn hình nha anh em!"
+            ]
+            ctas_footwear = [
+                f"Đi vào cực êm cực chất luôn! Mẫu {cleaned_name} này đang có deal hời, anh em bấm giỏ hàng chốt ngay nhé!",
+                f"Hack dáng cực kỳ mà giá siêu êm. Nhanh tay click vào giỏ hàng góc trái để rinh em {cleaned_name} này về nha!",
+                f"Đẹp từ phom dáng đến chất lượng. Anh em bấm mua ngay em {cleaned_name} ở giỏ hàng bên dưới nha!"
+            ]
+            ctas_other = [
+                f"Dùng siêu thích và tiện lợi lắm luôn. Anh em bấm ngay vào giỏ hàng góc trái để săn deal hời em {cleaned_name} nha!",
+                f"Quá chất lượng so với giá tiền luôn. Mua ngay em {cleaned_name} ở link giỏ hàng bên dưới nhé anh em!",
+                f"Nói chung là 10 trên 10 không có điểm chê. Anh em nhanh tay bấm mua ở giỏ hàng nha!"
+            ]
+        else: # female
+            ctas_clothing = [
+                f"Mặc lên phom chuẩn tôn dáng cực kỳ! Mẫu {cleaned_name} này đáng mua lắm, chị em bấm giỏ hàng góc trái săn sale nha!",
+                f"Xinh thế này không mua là tiếc lắm nha. Chị em tranh thủ chốt ngay mẫu {cleaned_name} ở giỏ hàng bên dưới nha!",
+                f"Nói chung là 10 trên 10 mặc lên cưng lắm. Link mua em {cleaned_name} ở ngay góc trái màn hình nha mọi người!"
+            ]
+            ctas_footwear = [
+                f"Đi vào cực êm cực xinh luôn! Mẫu {cleaned_name} này đang có deal hời, chị em bấm giỏ hàng chốt ngay nhé!",
+                f"Hack dáng cực kỳ mà giá siêu yêu. Nhanh tay click vào giỏ hàng góc trái để rinh em {cleaned_name} này về nha mọi người!",
+                f"Đẹp từ phom dáng đến chất lượng. Chị em bấm mua ngay em {cleaned_name} ở giỏ hàng bên dưới nha!"
+            ]
+            ctas_other = [
+                f"Dùng siêu thích và cưng xỉu luôn. Mọi người bấm ngay vào giỏ hàng góc trái để săn deal hời em {cleaned_name} nha!",
+                f"Quá chất lượng so với giá tiền luôn. Mua ngay em {cleaned_name} ở link giỏ hàng bên dưới nhé cả nhà!",
+                f"Nói chung là 10 trên 10 không có điểm chê. Cả nhà nhanh tay bấm mua ở giỏ hàng nha!"
+            ]
+
+        if segment_index == 0:
+            if prod_type == "clothing":
+                options = hooks_clothing
+            elif prod_type == "footwear":
+                options = hooks_footwear
+            else:
+                options = hooks_other
+            return options[seed % len(options)]
+            
+        elif segment_index == total_segments - 1:
+            if prod_type == "clothing":
+                options = ctas_clothing
+            elif prod_type == "footwear":
+                options = ctas_footwear
+            else:
+                options = ctas_other
+            return options[seed % len(options)]
+            
+        else:
+            if prod_type == "clothing":
+                options = mid_clothing
+            elif prod_type == "footwear":
+                options = mid_footwear
+            else:
+                options = mid_other
+            idx = (seed + segment_index) % len(options)
+            return options[idx]
+
     def _build_segment_prompt(self, base_prompt: str, product_name: str, segment_index: int, total_segments: int, product_description: str | None = None) -> str:
         """
         Tạo prompt chi tiết cho từng phân đoạn video.
+        Có kịch bản tổng thể (storyline) xuyên suốt, nhạc nhất quán, description đã lọc sạch.
         """
         if "trending" in base_prompt.lower() or "dance" in base_prompt.lower():
             return self._build_trending_dance_prompt(base_prompt, product_name)
@@ -612,103 +873,141 @@ class GeminiVideoGenerator:
         cleaned_name = self._clean_product_name(product_name)
         gender = self._determine_gender(product_name, product_description)
         
+        # Sinh câu thuyết minh động và tự nhiên cho phân đoạn này
+        voiceover_line = self._generate_tiktok_voiceover(
+            product_name, product_description, gender, segment_index, total_segments, prod_type
+        )
+        
         if gender == "male":
             subject = "A handsome young Vietnamese man"
             pronoun = "He"
-            voice_xinh_qua = "chất quá cả nhà ơi, chất vải mềm mịn thích lắm luôn!"
-            voice_xinh_xiu = f"Đôi {cleaned_name} chất xỉu luôn, nhìn là mê ngay á mọi người!"
-            voice_xinh_tien = f"Món {cleaned_name} này nhìn là thích luôn, thiết kế đẹp và tiện lắm mọi người ơi!"
-            voice_xinh_ky_feet = "chất cực kỳ"
         else:
             subject = "A beautiful young Vietnamese woman"
             pronoun = "She"
-            voice_xinh_qua = "xinh quá cả nhà ơi, chất vải mềm mịn thích lắm luôn!"
-            voice_xinh_xiu = f"Đôi {cleaned_name} xinh xỉu luôn, nhìn là mê ngay á mọi người!"
-            voice_xinh_tien = f"Món {cleaned_name} này nhìn là thích luôn, thiết kế xinh và tiện lắm mọi người ơi!"
-            voice_xinh_ky_feet = "xinh cực kỳ"
 
-        desc_hint = f"Thông tin mô tả sản phẩm: {product_description}\n" if product_description else ""
+        # Lọc description sạch thay vì dump nguyên khối
+        clean_desc = self._extract_useful_description(product_description)
+        desc_hint = f"Product info: {clean_desc}. " if clean_desc else ""
+
+        # Chọn 1 bài nhạc cụ thể, nhất quán cho tất cả segments
+        music_name = self._pick_consistent_music(product_name)
+        music_instruction = (
+            f"REQUIRED: Background music must be {music_name} or a similar-style Vietnamese TikTok trending song (V-pop, nhạc trẻ Việt Nam), "
+            "upbeat and energetic, clearly audible throughout the entire clip. "
+        )
+
+        # === KỊCH BẢN TỔNG THỂ (STORYLINE) ===
+        # Clip 1 (segment 0): HOOK + REVIEW CẬN CẢNH - Thu hút, khoe sản phẩm chi tiết
+        # Clip 2 (segment cuối): TRY-ON + CTA - Mặc/dùng thử + kêu gọi mua hàng
+        # Clip giữa (nếu >2): CHI TIẾT BỔ SUNG - Zoom vào đặc điểm nổi bật
+
+        storyline_context = (
+            f"VIDEO STORYLINE: This is clip {segment_index + 1} of {total_segments} in a TikTok product review series. "
+        )
+        if segment_index == 0:
+            storyline_context += "This clip is the HOOK — grab attention and show close-up product details. "
+        elif segment_index == total_segments - 1:
+            storyline_context += "This clip is the FINALE — show the product being worn/used and end with a confident call-to-action pose. "
+        else:
+            storyline_context += "This clip shows ADDITIONAL DETAILS — highlight standout features and quality. "
+        
+        storyline_context += (
+            f"IMPORTANT: The same person ({subject.lower()}) appears in ALL clips with consistent appearance, "
+            "same setting style, same warm lighting, same fashion aesthetic throughout. "
+        )
 
         if segment_index == 0:
             if prod_type == "clothing":
                 return (
+                    f"{storyline_context}"
                     f"Viral TikTok OOTD outfit-check video clip, 9:16 vertical, cinematic aesthetic. "
                     f"{desc_hint}"
                     f"Product: '{cleaned_name}' clothing (reference image provided). "
                     f"{subject} in a bright aesthetic room with warm lighting. "
                     f"{pronoun} holds the clothing item close to camera, showing fabric texture and design details with a natural smile. "
                     f"Quick smooth cuts: close-up of fabric, label, stitching detail. Natural relaxed expression, not scripted. "
-                    "REQUIRED: Background music must be a currently viral Vietnamese TikTok song (V-pop, nhạc Việt trending trên TikTok Việt Nam), upbeat and energetic, clearly audible. "
-                    f"Soft Vietnamese voiceover blended with music: 'Mẫu {cleaned_name} này {voice_xinh_qua}' "
+                    f"{music_instruction}"
+                    f"Soft Vietnamese voiceover blended with music: '{voiceover_line}' "
                     "No text, no watermark. Duration 10 seconds."
                 )
             elif prod_type == "footwear":
                 return (
+                    f"{storyline_context}"
                     f"Viral TikTok shoe haul video clip, 9:16 vertical, aesthetic style. "
                     f"{desc_hint}"
                     f"Product: '{cleaned_name}' footwear (reference image provided). "
                     f"{subject} in a stylish setting holds the shoes close to camera. "
                     "Quick aesthetic cuts: shoe sole detail, side profile, material close-up. Natural delighted expression. "
-                    "REQUIRED: Background music must be a currently viral Vietnamese TikTok song (V-pop, nhạc Việt trending trên TikTok Việt Nam), upbeat and catchy, clearly audible. "
-                    f"Soft Vietnamese voiceover blended with music: {voice_xinh_xiu} "
+                    f"{music_instruction}"
+                    f"Soft Vietnamese voiceover blended with music: '{voiceover_line}' "
                     "No text, no watermark. Duration 10 seconds."
                 )
             else:
                 return (
+                    f"{storyline_context}"
                     f"Viral TikTok product unboxing clip, 9:16 vertical, aesthetic style. "
                     f"{desc_hint}"
                     f"Product: '{cleaned_name}' (reference image provided). "
                     f"{subject} holds the product near camera showing design and features. "
                     "Quick aesthetic cuts: product detail close-ups, packaging, key features. Natural happy expression. "
-                    "REQUIRED: Background music must be a currently viral Vietnamese TikTok song (V-pop, nhạc Việt trending trên TikTok Việt Nam), upbeat and fun, clearly audible. "
-                    f"Soft Vietnamese voiceover blended with music: {voice_xinh_tien} "
+                    f"{music_instruction}"
+                    f"Soft Vietnamese voiceover blended with music: '{voiceover_line}' "
                     "No text, no watermark. Duration 10 seconds."
                 )
 
         elif segment_index == total_segments - 1:
             if prod_type == "clothing":
                 return (
+                    f"{storyline_context}"
                     f"Viral TikTok OOTD try-on video clip, 9:16 vertical, aesthetic cinematic style. "
-                    f"Product: '{cleaned_name}' outfit. "
-                    f"{subject} is wearing the outfit in a well-lit aesthetic setting. "
-                    f"{pronoun} does a natural 360 spin showing the full outfit, walks gracefully, poses confidently. "
-                    "Multiple smooth aesthetic cuts: full body shot, waist detail, side profile. Bright natural smile. "
-                    "REQUIRED: Background music must be a currently viral Vietnamese TikTok song (V-pop, nhạc Việt trending trên TikTok Việt Nam), upbeat and energetic, clearly audible throughout. "
-                    f"Soft Vietnamese voiceover with music: 'Mặc lên phom chuẩn tôn dáng cực kỳ! {cleaned_name} này đáng mua lắm, bấm giỏ hàng ngay nha cả nhà!' "
+                    f"Product: '{cleaned_name}' outfit (same item from the previous review clip). "
+                    f"{subject} is now WEARING the outfit in the same well-lit aesthetic setting. "
+                    f"{pronoun} does a natural 360 spin showing the full outfit, walks gracefully towards camera, poses confidently with a bright smile. "
+                    "Multiple smooth aesthetic cuts: full body shot, waist detail, side profile. "
+                    f"{music_instruction}"
+                    f"Soft Vietnamese voiceover with music: '{voiceover_line}' "
                     "No text, no watermark. Duration 10 seconds."
                 )
             elif prod_type == "footwear":
                 return (
+                    f"{storyline_context}"
                     f"Viral TikTok shoe try-on video clip, 9:16 vertical, aesthetic style. "
-                    f"Product: '{cleaned_name}' footwear. "
-                    f"{subject} wearing the shoes, walking gracefully in a stylish setting. "
+                    f"Product: '{cleaned_name}' footwear (same pair from the previous review clip). "
+                    f"{subject} is now WEARING the shoes, walking gracefully in the same stylish setting. "
                     "Smooth aesthetic cuts: feet/shoes walking, full outfit from ground up, close-up of shoes in motion. "
-                    "REQUIRED: Background music must be a currently viral Vietnamese TikTok song (V-pop, nhạc Việt trending trên TikTok Việt Nam), catchy and upbeat, clearly audible throughout. "
-                    f"Soft Vietnamese voiceover with music: 'Đi vào êm và {voice_xinh_ky_feet}! {cleaned_name} hack dáng dã man luôn, bấm giỏ hàng ngay nhé!' "
+                    f"{music_instruction}"
+                    f"Soft Vietnamese voiceover with music: '{voiceover_line}' "
                     "No text, no watermark. Duration 10 seconds."
                 )
             else:
                 return (
+                    f"{storyline_context}"
                     f"Viral TikTok product demo clip, 9:16 vertical, aesthetic style. "
-                    f"Product: '{cleaned_name}'. "
-                    f"{subject} demonstrates using the product with genuine delight and satisfaction. "
+                    f"Product: '{cleaned_name}' (same item from the previous review clip). "
+                    f"{subject} demonstrates USING the product with genuine delight and satisfaction. "
                     "Smooth aesthetic cuts: product in use, feature highlights, happy reaction shots. "
-                    "REQUIRED: Background music must be a currently viral Vietnamese TikTok song (V-pop, nhạc Việt trending trên TikTok Việt Nam), upbeat and energetic, clearly audible throughout. "
-                    f"Soft Vietnamese voiceover with music: '{cleaned_name} dùng siêu thích, tiện và đáng tiền lắm mọi người! Bấm mua ngay nhé!' "
+                    f"{music_instruction}"
+                    f"Soft Vietnamese voiceover with music: '{voiceover_line}' "
                     "No text, no watermark. Duration 10 seconds."
                 )
 
         else:
-            if gender == "male":
-                action_desc = "cậu ấy xoay người nhẹ nhàng khoe chi tiết."
+            # Segment giữa: chi tiết bổ sung
+            if prod_type == "clothing":
+                detail_action = f"{pronoun} shows close-up of stitching quality, fabric stretch test, and how the material drapes naturally."
+            elif prod_type == "footwear":
+                detail_action = f"{pronoun} shows close-up of sole grip, cushioning detail, and how the shoe fits on foot."
             else:
-                action_desc = "cô gái xoay người nhẹ nhàng khoe chi tiết."
+                detail_action = f"{pronoun} shows close-up of product build quality, key feature demonstration, and size/weight in hand."
             return (
-                f"Render video demo bổ sung (tỉ lệ dọc 9:16) cho sản phẩm '{cleaned_name}'. "
-                f"Nội dung: Camera quay cận cảnh {action_desc} "
-                "QUAN TRỌNG: Nhạc nền phải là bài nhạc Việt đang viral trending trên TikTok Việt Nam (V-pop, nhạc trẻ), sôi động và bắt tai, nghe rõ ràng. "
-                "QUAN TRỌNG: Video phải có âm thanh thuyết minh giọng nói tiếng Việt tự nhiên hòa với nhạc nền. "
-                "Không chữ, không watermark. Thời lượng 10 giây."
+                f"{storyline_context}"
+                f"TikTok product detail review clip, 9:16 vertical, aesthetic cinematic style. "
+                f"Product: '{cleaned_name}' (same item, same person, same setting as other clips). "
+                f"{subject} continues the review. {detail_action} "
+                "Natural genuine expression showing satisfaction with the quality. "
+                f"{music_instruction}"
+                f"Soft Vietnamese voiceover with music: '{voiceover_line}' "
+                "No text, no watermark. Duration 10 seconds."
             )
 
     def _build_safe_fallback_prompt(self, product_name: str, segment_index: int, total_segments: int) -> str:
@@ -716,13 +1015,18 @@ class GeminiVideoGenerator:
         prod_type = self._determine_product_type(product_name)
         cleaned_name = self._clean_product_name(product_name)
         duration = 10
+        music_name = self._pick_consistent_music(product_name)
+        music_line = (
+            f"REQUIRED: Background music must be {music_name} or a similar-style Vietnamese TikTok trending song (V-pop, nhạc trẻ Việt Nam), "
+            "upbeat and catchy, clearly audible. "
+        )
 
         if prod_type == "clothing":
             return (
                 f"Aesthetic product showcase video, 9:16 vertical, cinematic quality. "
                 f"Fashion item '{cleaned_name}' displayed on a stylish hanger. "
                 "Camera slowly pans and rotates around the item, macro close-up of fabric texture and stitching. "
-                "REQUIRED: Background music must be a currently viral Vietnamese TikTok song (V-pop, nhạc Việt trending trên TikTok Việt Nam), upbeat and catchy, clearly audible. "
+                f"{music_line}"
                 f"No people, no text, no watermark. Duration {duration} seconds."
             )
         elif prod_type == "footwear":
@@ -730,7 +1034,7 @@ class GeminiVideoGenerator:
                 f"Aesthetic product showcase video, 9:16 vertical, cinematic quality. "
                 f"Footwear '{cleaned_name}' displayed on a clean surface with beautiful lighting. "
                 "Camera slowly pulls back for a full product reveal, macro close-up of material and sole detail. "
-                "REQUIRED: Background music must be a currently viral Vietnamese TikTok song (V-pop, nhạc Việt trending trên TikTok Việt Nam), upbeat and catchy, clearly audible. "
+                f"{music_line}"
                 f"No people, no text, no watermark. Duration {duration} seconds."
             )
         else:
@@ -738,7 +1042,7 @@ class GeminiVideoGenerator:
                 f"Aesthetic product showcase video, 9:16 vertical, cinematic quality. "
                 f"Product '{cleaned_name}' displayed on a clean surface with beautiful lighting. "
                 "Camera slowly pans around the item, macro close-up of key features and design. "
-                "REQUIRED: Background music must be a currently viral Vietnamese TikTok song (V-pop, nhạc Việt trending trên TikTok Việt Nam), upbeat and energetic, clearly audible. "
+                f"{music_line}"
                 f"No people, no text, no watermark. Duration {duration} seconds."
             )
 
@@ -756,6 +1060,19 @@ class GeminiVideoGenerator:
         """
         logger.info(f"🎬 Bắt đầu quy trình tạo video đa phân đoạn ({num_segments} clips) cho: {product_name}")
         self.select_video_mode_if_needed()
+
+        # Log kịch bản tổng thể
+        music_name = self._pick_consistent_music(product_name)
+        cleaned_name = self._clean_product_name(product_name)
+        logger.info(f"📋 Kịch bản tổng thể cho '{cleaned_name}':")
+        logger.info(f"   🎵 Nhạc nền xuyên suốt: {music_name}")
+        for si in range(num_segments):
+            if si == 0:
+                logger.info(f"   📹 Clip {si+1}: HOOK + Review cận cảnh sản phẩm")
+            elif si == num_segments - 1:
+                logger.info(f"   📹 Clip {si+1}: Try-on/Demo + CTA kêu gọi mua hàng")
+            else:
+                logger.info(f"   📹 Clip {si+1}: Chi tiết bổ sung chất lượng sản phẩm")
 
         segment_videos = []
         
@@ -804,14 +1121,8 @@ class GeminiVideoGenerator:
                 ).count()
 
                 # Bấm nút gửi
-                send_btn = self.page.locator(
-                    'button[aria-label*="Send"], button[aria-label*="Gửi"], button[class*="send-button"]'
-                ).first
-                try:
-                    send_btn.click(timeout=5000)
-                except Exception:
-                    send_btn.evaluate("el => el.click()")
                 logger.info("⏳ Đang gửi yêu cầu...")
+                self._click_send_button()
                 self._delay()
                 
                 # Đợi xem video mới xuất hiện, bị safety block hoặc dính giới hạn 2 video song song
@@ -839,7 +1150,7 @@ class GeminiVideoGenerator:
                     # 2. Kiểm tra lỗi giới hạn và safety block (chỉ check sau 10s, khi không có video mới và ĐÃ XUẤT HIỆN BONG BÓNG CHAT MỚI)
                     if not has_new_video and time.time() - start_wait > 10:
                         current_responses = self.page.locator(
-                            'message-content, [data-test-id="response-container"], .model-response, .message-content'
+                            'message-content, [data-test-id="response-container"], .model-response, .message-content, [role="alert"], .inline-alert, .error-message'
                         )
                         if current_responses.count() > initial_response_count:
                             latest_text = (current_responses.nth(current_responses.count() - 1).text_content() or "").strip()

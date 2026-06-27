@@ -78,7 +78,7 @@ def decrypt_cookie_value(encrypted_value: bytes) -> str:
         from Crypto.Protocol.KDF import PBKDF2
 
         # Thử key "peanuts" (Chrome Linux default khi không có keyring)
-        password = b"peanuts"
+        password = "peanuts"
         salt = b"saltysalt"
         key = PBKDF2(password, salt, dkLen=16, count=1)
 

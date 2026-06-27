@@ -482,6 +482,61 @@ class TikTokUploader:
                             logger.info("✅ Click Add với force=True thành công!")
                         except Exception as click_err:
                             logger.warning(f"❌ Không thể click Add bằng bất kỳ cách nào: {click_err}")
+                
+                # CHỜ DIALOG ĐÓNG & CHECK VALIDATION LỖI (do ký tự đặc biệt)
+                self.page.wait_for_timeout(2000)
+                if name_dialog.count() > 0 and name_dialog.is_visible():
+                    logger.warning("⚠️ Dialog vẫn chưa đóng sau khi click Add. Có thể do lỗi validation ký tự đặc biệt của TikTok Shop.")
+                    
+                    # Tìm ô input để xóa ký tự đặc biệt
+                    name_input = name_dialog.locator('input[type="text"]').first
+                    if name_input.count() > 0:
+                        try:
+                            # Đọc text hiện tại trong ô input
+                            current_text = name_input.input_value()
+                            logger.info(f"🔍 Text hiện tại trong ô input: '{current_text}'")
+                            
+                            # Clean text: chỉ giữ chữ cái (kể cả tiếng Việt), số và khoảng trắng
+                            raw_clean = "".join(c for c in current_text if c.isalnum() or c.isspace())
+                            clean_name = " ".join(raw_clean.split())[:30].strip()
+                            
+                            logger.info(f"✍️ Tiến hành điền tên đã loại bỏ ký tự đặc biệt: '{clean_name}'")
+                            name_input.click()
+                            name_input.evaluate("el => el.value = ''")
+                            name_input.fill(clean_name)
+                            self.page.wait_for_timeout(1000)
+                            
+                            # Click Add lại
+                            logger.info("👉 Click Add lần 2 với tên đã lọc ký tự đặc biệt...")
+                            add_confirm.click(timeout=5000)
+                            self.page.wait_for_timeout(2000)
+                            
+                            # Nếu vẫn lỗi (có thể do TikTok không cho phép tiếng Việt có dấu ở một số thị trường/tài khoản)
+                            if name_dialog.count() > 0 and name_dialog.is_visible():
+                                ascii_name = self.strip_accents(clean_name)
+                                logger.warning(f"⚠️ Lần 2 vẫn không đóng. Tiến hành chuyển hẳn sang tiếng Việt không dấu: '{ascii_name}'")
+                                name_input.click()
+                                name_input.evaluate("el => el.value = ''")
+                                name_input.fill(ascii_name)
+                                self.page.wait_for_timeout(1000)
+                                
+                                logger.info("👉 Click Add lần 3 với tên không dấu...")
+                                add_confirm.click(timeout=5000)
+                                self.page.wait_for_timeout(2000)
+                                
+                            # Nếu vẫn không được nữa thì bấm Hủy để tránh kẹt
+                            if name_dialog.count() > 0 and name_dialog.is_visible():
+                                logger.error("❌ Không thể gán link sản phẩm do lỗi validation liên tục. Đóng dialog để tiếp tục đăng video...")
+                                cancel_btn = name_dialog.locator(
+                                    'button:has-text("Cancel"), '
+                                    'button:has-text("Hủy"), '
+                                    'button[class*="cancel"]'
+                                ).first
+                                if cancel_btn.count() > 0:
+                                    cancel_btn.click()
+                                    self.page.wait_for_timeout(1000)
+                        except Exception as validation_err:
+                            logger.error(f"❌ Gặp lỗi khi cố gắng xử lý lỗi validation: {validation_err}")
             else:
                 raise Exception("Không tìm thấy nút Add hoặc Thêm trong dialog để xác nhận.")
             self._delay()
@@ -493,6 +548,18 @@ class TikTokUploader:
             logger.error(f"❌ Lỗi khi gán sản phẩm: {e}")
             logger.warning("⚠️ Bỏ qua bước gán sản phẩm, vẫn tiếp tục")
             return False
+
+    def strip_accents(self, text: str) -> str:
+        """Chuyển đổi chuỗi tiếng Việt có dấu thành không dấu."""
+        import unicodedata
+        try:
+            text = unicodedata.normalize('NFD', text)
+            text = ''.join(c for c in text if unicodedata.category(c) != 'Mn')
+            # Thay thế đ, Đ
+            text = text.replace('đ', 'd').replace('Đ', 'D')
+            return text
+        except Exception:
+            return text
 
     # ------------------------------------------------------------------
     # Bước 5: Đăng video
@@ -611,8 +678,7 @@ class TikTokUploader:
             # Scroll xuống cuối trang để nút Post hiện ra
             self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
             self._delay()
-            self.post_video()
-            return True
+            return self.post_video()
         except Exception as e:
             logger.error(f"❌ Pipeline thất bại: {e}")
             return False
