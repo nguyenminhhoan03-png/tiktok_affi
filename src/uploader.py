@@ -220,8 +220,8 @@ class TikTokUploader:
             ).first
             search_input.wait_for(state="visible", timeout=10000)
             search_input.click()
-            # Chỉ dùng 20 ký tự đầu để search cho chính xác
-            search_input.fill(name[:20])
+            # Dùng toàn bộ tên sản phẩm để search chính xác, tránh nhầm lẫn sản phẩm khác
+            search_input.fill(name)
             self._delay()
             self.page.keyboard.press("Enter")
             self.page.wait_for_timeout(2000)  # Chờ kết quả tìm kiếm load
