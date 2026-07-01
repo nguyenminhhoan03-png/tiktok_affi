@@ -560,7 +560,12 @@ def run_pipeline():
                     break
             except Exception as e:
                 err_str = str(e)
-                is_expired = "GEMINI_DAILY_LIMIT_EXCEEDED" in err_str or "session hết hạn" in err_str or "chưa đăng nhập" in err_str
+                is_expired = (
+                    "GEMINI_DAILY_LIMIT_EXCEEDED" in err_str 
+                    or "GEMINI_SUBSCRIPTION_REQUIRED" in err_str
+                    or "session hết hạn" in err_str 
+                    or "chưa đăng nhập" in err_str
+                )
                 if is_expired:
                     logger.warning(f"⚠️ Tài khoản Google hiện tại hết hạn hoặc hết giới hạn tạo video: {e}")
                     

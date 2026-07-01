@@ -383,6 +383,10 @@ class GeminiVideoGenerator:
                     if current_responses.count() > initial_response_count:
                         latest_text = (current_responses.nth(current_responses.count() - 1).text_content() or "").strip()
                         
+                        if self._check_subscription_required(latest_text):
+                            logger.error("❌ Tài khoản Gemini này chưa có hoặc hết hạn subscription Pro/Advanced!")
+                            raise RuntimeError("GEMINI_SUBSCRIPTION_REQUIRED")
+
                         if self._check_daily_limit(latest_text):
                             logger.error("❌ Hết giới hạn tạo video trong ngày cho tài khoản này!")
                             raise RuntimeError("GEMINI_DAILY_LIMIT_EXCEEDED")
@@ -573,6 +577,30 @@ class GeminiVideoGenerator:
                 return True
         return False
 
+    def _check_subscription_required(self, text: str) -> bool:
+        """Kiểm tra xem Gemini có yêu cầu nâng cấp subscription (hết hạn Pro/Advanced) không."""
+        subscription_keywords = [
+            "upgrade your subscription",
+            "nâng cấp gói",
+            "nâng cấp đăng ký",
+            "subscription required",
+            "need to upgrade",
+            "cần nâng cấp",
+            "subscribe to",
+            "premium feature",
+            "tính năng cao cấp",
+            "gemini advanced",
+            "upgrade to",
+            "you'll need to upgrade",
+            "bạn cần nâng cấp",
+            "yêu cầu nâng cấp",
+        ]
+        text_lower = text.lower()
+        for kw in subscription_keywords:
+            if kw in text_lower:
+                return True
+        return False
+
     def _determine_product_type(self, product_name: str) -> str:
         name_lower = product_name.lower()
         
@@ -733,138 +761,108 @@ class GeminiVideoGenerator:
         total_segments: int,
         prod_type: str
     ) -> str:
-        """Sinh giọng đọc thuyết minh tự nhiên và đa dạng chuẩn TikTok dựa trên loại sản phẩm và giới tính."""
-        cleaned_name = self._clean_product_name(product_name)
+        """Sinh kịch bản voiceover liền mạch cho chuỗi video review TikTok.
         
-        # Tạo seed từ tên sản phẩm để các clip của cùng sản phẩm có kịch bản nhất quán
+        Kịch bản 2 phần:
+          Clip 1: Hook mở đầu → giới thiệu + review chi tiết (chất liệu, form dáng, cảm nhận)
+          Clip 2: Chuyển tiếp mượt → mặc/dùng thử + CTA kêu gọi mua
+        
+        2 clip đọc liên tiếp phải nghe như 1 bài review hoàn chỉnh.
+        """
+        cleaned_name = self._clean_product_name(product_name)
         seed = sum(ord(c) for c in cleaned_name)
         
-        # Hooks (segment 0)
+        # ====== KỊCH BẢN HOÀN CHỈNH (mỗi set gồm [clip1, clip2] đọc liền mạch) ======
         if gender == "male":
-            hooks_clothing = [
-                f"Mẫu {cleaned_name} này chất quá cả nhà ơi, chất vải mềm mịn sờ sướng tay cực kỳ!",
-                f"Review thực tế cho anh em mẫu {cleaned_name} siêu hot hit này nha, nhìn cái phom là thấy ưng rồi!",
-                f"Anh em nào đang tìm {cleaned_name} đi chơi đi làm thì bơi hết vào đây xem cận cảnh nè!",
-                f"Đúng là chân ái của anh em đây rồi, mẫu {cleaned_name} lên đồ là bao ngầu luôn!"
-            ]
-            hooks_footwear = [
-                f"Đôi {cleaned_name} chất xỉu luôn anh em ơi, lên chân bao êm bao ngầu!",
-                f"Hé lộ mẫu {cleaned_name} đang làm mưa làm gió trên TikTok, thiết kế cực kỳ thể thao!",
-                f"Cận cảnh em {cleaned_name} siêu đẹp cho anh em đây, chất da/vải siêu bền nhé!",
-                f"Lần đầu tiên thấy một đôi {cleaned_name} đẹp thế này, phom chuẩn không cần chỉnh luôn!"
-            ]
-            hooks_other = [
-                f"Món {cleaned_name} này cực kỳ xịn sò anh em ơi, thiết kế thông minh và tiện lợi lắm!",
-                f"Review thực tế em {cleaned_name} cho cả nhà, cầm trên tay chắc chắn cực kỳ!",
-                f"Anh em nào mê công nghệ/đồ tiện ích thì không thể bỏ qua em {cleaned_name} này nha!",
-                f"Unboxing siêu phẩm {cleaned_name} đang siêu hot gần đây, dùng là ghiền luôn!"
-            ]
-        else: # female
-            hooks_clothing = [
-                f"Mẫu {cleaned_name} này xinh quá cả nhà ơi, chất vải mềm mịn thích lắm luôn!",
-                f"Review thực tế cho chị em mẫu {cleaned_name} siêu hot hit này nha, mặc lên là xinh lung linh luôn!",
-                f"Chị em nào đang tìm {cleaned_name} đi chơi đi tiệc thì bơi hết vào đây xem cận cảnh nè!",
-                f"Đúng là chân ái của chị em mình đây rồi, mẫu {cleaned_name} này mặc tôn dáng dã man!"
-            ]
-            hooks_footwear = [
-                f"Đôi {cleaned_name} xinh xỉu luôn mọi người ơi, nhìn cái là mê ngay á!",
-                f"Hé lộ đôi {cleaned_name} đang làm mưa làm gió trên TikTok, hack dáng cực đỉnh luôn!",
-                f"Cận cảnh em {cleaned_name} siêu dễ thương cho chị em đây, đi êm chân lắm nhé!",
-                f"Lần đầu tiên thấy một đôi {cleaned_name} xinh thế này, phối đồ bánh bèo hay năng động đều hợp!"
-            ]
-            hooks_other = [
-                f"Món {cleaned_name} này xinh và tiện lắm mọi người ơi, nhìn cái là thích ngay luôn!",
-                f"Review thực tế em {cleaned_name} cho cả nhà, thiết kế nhỏ gọn xinh xắn lắm!",
-                f"Chị em nào thích đồ xinh xịn mịn thì không thể bỏ qua em {cleaned_name} này đâu nha!",
-                f"Unboxing siêu phẩm {cleaned_name} đang siêu hot gần đây, decor hay dùng đều mê!"
-            ]
-
-        # Mid body reviews
-        mid_clothing = [
-            "Đường kim mũi chỉ được may cực kỳ tỉ mỉ, sờ vào thấy ngay sự cao cấp.",
-            "Chất vải co giãn thoải mái, thấm hút mồ hôi tốt nên mặc cả ngày không sợ nóng bí.",
-            "Từng chi tiết cúc áo và đường viền được hoàn thiện rất tốt, phom lên chuẩn chỉ cực kỳ.",
-            "Thiết kế trẻ trung, màu sắc tôn da phối đồ siêu dễ luôn mọi người ạ."
-        ]
-        mid_footwear = [
-            "Đế giày được làm từ cao su chống trơn trượt, đi bộ hay chạy nhảy đều cực kỳ thoải mái.",
-            "Từng đường keo mũi chỉ rất chắc chắn, lớp lót bên trong êm ái bảo vệ gót chân.",
-            "Phom giày ôm chân gọn gàng, tạo cảm giác nhẹ nhàng thanh thoát khi di chuyển.",
-            "Màu sắc basic cực dễ phối đồ, đi học đi làm hay đi chơi đều nổi bật."
-        ]
-        mid_other = [
-            "Chất liệu cao cấp, độ hoàn thiện cao, dùng cực kỳ bền bỉ theo thời gian.",
-            "Tính năng thông minh giúp tiết kiệm thời gian, cực kỳ tiện lợi cho cuộc sống hàng ngày.",
-            "Màu sắc tối giản hiện đại, mang đi học đi làm hay để bàn làm việc đều rất sang.",
-            "Cầm cực kỳ đầm tay, các nút bấm và cổng kết nối hoạt động siêu mượt mà."
-        ]
-
-        # Call To Action (last segment)
-        if gender == "male":
-            ctas_clothing = [
-                f"Mặc lên phom chuẩn bao đẹp luôn anh em! Mẫu {cleaned_name} này đáng mua lắm, bấm giỏ hàng góc trái săn sale nha!",
-                f"Lên đồ cực chất mà giá lại hạt dẻ. Anh em tranh thủ chốt ngay mẫu {cleaned_name} ở giỏ hàng bên dưới nha!",
-                f"Nói chung là 10 trên 10 cực kỳ đáng tiền luôn. Link mua em {cleaned_name} ở ngay góc trái màn hình nha anh em!"
-            ]
-            ctas_footwear = [
-                f"Đi vào cực êm cực chất luôn! Mẫu {cleaned_name} này đang có deal hời, anh em bấm giỏ hàng chốt ngay nhé!",
-                f"Hack dáng cực kỳ mà giá siêu êm. Nhanh tay click vào giỏ hàng góc trái để rinh em {cleaned_name} này về nha!",
-                f"Đẹp từ phom dáng đến chất lượng. Anh em bấm mua ngay em {cleaned_name} ở giỏ hàng bên dưới nha!"
-            ]
-            ctas_other = [
-                f"Dùng siêu thích và tiện lợi lắm luôn. Anh em bấm ngay vào giỏ hàng góc trái để săn deal hời em {cleaned_name} nha!",
-                f"Quá chất lượng so với giá tiền luôn. Mua ngay em {cleaned_name} ở link giỏ hàng bên dưới nhé anh em!",
-                f"Nói chung là 10 trên 10 không có điểm chê. Anh em nhanh tay bấm mua ở giỏ hàng nha!"
-            ]
-        else: # female
-            ctas_clothing = [
-                f"Mặc lên phom chuẩn tôn dáng cực kỳ! Mẫu {cleaned_name} này đáng mua lắm, chị em bấm giỏ hàng góc trái săn sale nha!",
-                f"Xinh thế này không mua là tiếc lắm nha. Chị em tranh thủ chốt ngay mẫu {cleaned_name} ở giỏ hàng bên dưới nha!",
-                f"Nói chung là 10 trên 10 mặc lên cưng lắm. Link mua em {cleaned_name} ở ngay góc trái màn hình nha mọi người!"
-            ]
-            ctas_footwear = [
-                f"Đi vào cực êm cực xinh luôn! Mẫu {cleaned_name} này đang có deal hời, chị em bấm giỏ hàng chốt ngay nhé!",
-                f"Hack dáng cực kỳ mà giá siêu yêu. Nhanh tay click vào giỏ hàng góc trái để rinh em {cleaned_name} này về nha mọi người!",
-                f"Đẹp từ phom dáng đến chất lượng. Chị em bấm mua ngay em {cleaned_name} ở giỏ hàng bên dưới nha!"
-            ]
-            ctas_other = [
-                f"Dùng siêu thích và cưng xỉu luôn. Mọi người bấm ngay vào giỏ hàng góc trái để săn deal hời em {cleaned_name} nha!",
-                f"Quá chất lượng so với giá tiền luôn. Mua ngay em {cleaned_name} ở link giỏ hàng bên dưới nhé cả nhà!",
-                f"Nói chung là 10 trên 10 không có điểm chê. Cả nhà nhanh tay bấm mua ở giỏ hàng nha!"
-            ]
-
-        if segment_index == 0:
-            if prod_type == "clothing":
-                options = hooks_clothing
-            elif prod_type == "footwear":
-                options = hooks_footwear
-            else:
-                options = hooks_other
-            return options[seed % len(options)]
-            
-        elif segment_index == total_segments - 1:
-            if prod_type == "clothing":
-                options = ctas_clothing
-            elif prod_type == "footwear":
-                options = ctas_footwear
-            else:
-                options = ctas_other
-            return options[seed % len(options)]
-            
+            addr = "anh em"
+            addr2 = "cả nhà"
         else:
-            if prod_type == "clothing":
-                options = mid_clothing
-            elif prod_type == "footwear":
-                options = mid_footwear
-            else:
-                options = mid_other
-            idx = (seed + segment_index) % len(options)
-            return options[idx]
+            addr = "chị em"
+            addr2 = "mọi người"
+
+        if prod_type == "clothing":
+            scripts = [
+                # Script set 0
+                [
+                    f"Ê {addr} ơi, hôm nay review thực tế mẫu {cleaned_name} siêu hot này nha! Cầm lên là thấy chất vải mềm mịn, đường may tỉ mỉ, form dáng chuẩn không cần chỉnh luôn.",
+                    f"Giờ mặc thử cho {addr} xem nè! Phom lên người cực kỳ tôn dáng, thoải mái di chuyển cả ngày. Đáng mua lắm, {addr} bấm giỏ hàng góc trái chốt ngay nhé!",
+                ],
+                # Script set 1
+                [
+                    f"Mẫu {cleaned_name} này {addr2} ơi, vừa mở ra là ưng ngay! Chất vải dày dặn nhưng mặc mát, đường kim mũi chỉ cực kỳ cẩn thận, nhìn phom là biết chuẩn đẹp rồi.",
+                    f"Mặc lên người thử nè, nhìn xem tôn dáng cỡ nào! Màu sắc trên người đẹp hơn hình nữa. Thích thì {addr} ơi bấm ngay vào giỏ hàng bên dưới săn sale nha!",
+                ],
+                # Script set 2
+                [
+                    f"Review nhanh em {cleaned_name} đang viral này nha {addr2}! Cầm lên sờ thử chất vải cotton cao cấp, co giãn thoải mái, thiết kế trẻ trung hợp xu hướng cực kỳ.",
+                    f"Xong rồi mặc thử luôn cho {addr} xem thực tế nè! Form chuẩn đẹp lắm, phối đồ gì cũng hợp. Link mua ở ngay góc trái màn hình, nhanh tay chốt kẻo hết hàng nha!",
+                ],
+                # Script set 3
+                [
+                    f"Hôm nay khui hàng mẫu {cleaned_name} cho {addr} xem nha! Ấn tượng đầu tiên là chất vải rất xịn, sờ vào mềm mịn, đường may gọn gàng không chỉ thừa.",
+                    f"Thử lên đồ luôn nè, {addr} nhìn xem phom dáng có chuẩn không! Mặc quá thoải mái luôn. Giá lại hạt dẻ nữa, bấm giỏ hàng chốt đơn ngay {addr} nhé!",
+                ],
+            ]
+        elif prod_type == "footwear":
+            scripts = [
+                [
+                    f"Review đôi {cleaned_name} siêu hot cho {addr} nè! Cầm lên là thấy chất da/vải rất tốt, đế dày chắc chắn, phom gọn gàng đẹp mắt cực kỳ.",
+                    f"Xỏ vào chân thử luôn nha! Đi vào êm ái lắm, ôm chân vừa vặn không bị rộng hay chật. Quá ưng luôn, {addr} bấm giỏ hàng góc trái rinh ngay nhé!",
+                ],
+                [
+                    f"Đôi {cleaned_name} này {addr2} ơi, mở hộp ra là mê luôn! Từng đường chỉ cực tỉ mỉ, đế cao su chống trượt, kiểu dáng trẻ trung phối đồ gì cũng hợp.",
+                    f"Lên chân thử cho {addr} xem nè! Nhẹ lắm mà đi cả ngày không đau chân. Thích thì click ngay vào giỏ hàng bên dưới, đang có deal hời lắm nha!",
+                ],
+                [
+                    f"Hôm nay unbox đôi {cleaned_name} đang gây sốt nè {addr2}! Chất liệu xịn sò, đường keo chắc chắn, thiết kế vừa thể thao vừa thanh lịch luôn.",
+                    f"Giờ thử đi vài bước cho {addr} xem nha! Cảm giác êm ái nhẹ nhàng lắm, phom chuẩn hack dáng cực đỉnh. Link mua ngay góc trái, nhanh tay chốt nha {addr}!",
+                ],
+            ]
+        else:
+            scripts = [
+                [
+                    f"Review em {cleaned_name} cho {addr2} nha! Cầm trên tay chắc chắn, thiết kế nhỏ gọn tinh tế, hoàn thiện cực kỳ cao cấp luôn.",
+                    f"Dùng thử luôn nè, {addr} xem hiệu quả thực tế nha! Tính năng ngon lành, dùng rất mượt mà. Quá đáng đồng tiền, bấm giỏ hàng góc trái chốt ngay nhé!",
+                ],
+                [
+                    f"Unbox siêu phẩm {cleaned_name} cho {addr2} đây! Mở ra ấn tượng ngay với chất liệu cao cấp, kích thước vừa tay, từng chi tiết đều được làm rất tỉ mỉ.",
+                    f"Test thực tế cho {addr} xem luôn nè! Hoạt động mượt mà, đúng như quảng cáo luôn. Thích thì {addr} click giỏ hàng bên dưới săn deal ngay nha!",
+                ],
+                [
+                    f"Hôm nay review thực tế em {cleaned_name} đang hot trend nè {addr2}! Thiết kế thông minh, chất liệu bền đẹp, cầm lên là thấy đáng tiền ngay.",
+                    f"Giờ dùng thử cho {addr} xem có ngon như lời đồn không nha! Quá mượt mà và tiện lợi luôn. Link mua ở góc trái màn hình, nhanh tay chốt kẻo hết nha {addr}!",
+                ],
+            ]
+
+        # Chọn script set dựa trên seed (nhất quán cho cùng sản phẩm)
+        script_set = scripts[seed % len(scripts)]
+        
+        # Trả về đúng phần cho segment tương ứng
+        if total_segments == 2:
+            # 2 clips: clip 0 = phần 1, clip 1 = phần 2
+            return script_set[min(segment_index, 1)]
+        elif segment_index == 0:
+            return script_set[0]
+        elif segment_index == total_segments - 1:
+            return script_set[1]
+        else:
+            # Segments giữa: sinh câu review chi tiết bổ sung
+            mid_lines = [
+                "Nhìn kỹ từng chi tiết là thấy sự khác biệt, chất lượng thực sự cao cấp hơn hẳn.",
+                "Zoom cận cảnh cho mọi người thấy nè, hoàn thiện tỉ mỉ từng milimet luôn.",
+                "Sờ vào là biết hàng xịn ngay, chất liệu dày dặn mà vẫn thoải mái lắm.",
+                "Chi tiết này là điểm cộng lớn nè, ít sản phẩm nào làm được tốt như vậy.",
+            ]
+            return mid_lines[(seed + segment_index) % len(mid_lines)]
 
     def _build_segment_prompt(self, base_prompt: str, product_name: str, segment_index: int, total_segments: int, product_description: str | None = None) -> str:
         """
-        Tạo prompt chi tiết cho từng phân đoạn video.
-        Có kịch bản tổng thể (storyline) xuyên suốt, nhạc nhất quán, description đã lọc sạch.
+        Tạo prompt cho từng clip video với kịch bản hành động HOÀN TOÀN KHÁC NHAU giữa các clip.
+        
+        Clip 1: UNBOXING/HANDS-ON — Tay cầm sản phẩm, macro close-up, sờ chất liệu, lật xem tag
+        Clip 2: TRY-ON/STYLING — Mặc/dùng lên người, đi lại, quay 360, full-body shot
+        
+        2 clip ghép lại = 1 video review hoàn chỉnh từ "mở hộp → mặc thử → kêu gọi mua"
         """
         if "trending" in base_prompt.lower() or "dance" in base_prompt.lower():
             return self._build_trending_dance_prompt(base_prompt, product_name)
@@ -873,142 +871,150 @@ class GeminiVideoGenerator:
         cleaned_name = self._clean_product_name(product_name)
         gender = self._determine_gender(product_name, product_description)
         
-        # Sinh câu thuyết minh động và tự nhiên cho phân đoạn này
         voiceover_line = self._generate_tiktok_voiceover(
             product_name, product_description, gender, segment_index, total_segments, prod_type
         )
         
         if gender == "male":
-            subject = "A handsome young Vietnamese man"
+            subject = "a handsome young Vietnamese man"
             pronoun = "He"
+            possessive = "his"
         else:
-            subject = "A beautiful young Vietnamese woman"
+            subject = "a beautiful young Vietnamese woman"
             pronoun = "She"
+            possessive = "her"
 
-        # Lọc description sạch thay vì dump nguyên khối
         clean_desc = self._extract_useful_description(product_description)
-        desc_hint = f"Product info: {clean_desc}. " if clean_desc else ""
-
-        # Chọn 1 bài nhạc cụ thể, nhất quán cho tất cả segments
-        music_name = self._pick_consistent_music(product_name)
-        music_instruction = (
-            f"REQUIRED: Background music must be {music_name} or a similar-style Vietnamese TikTok trending song (V-pop, nhạc trẻ Việt Nam), "
-            "upbeat and energetic, clearly audible throughout the entire clip. "
-        )
-
-        # === KỊCH BẢN TỔNG THỂ (STORYLINE) ===
-        # Clip 1 (segment 0): HOOK + REVIEW CẬN CẢNH - Thu hút, khoe sản phẩm chi tiết
-        # Clip 2 (segment cuối): TRY-ON + CTA - Mặc/dùng thử + kêu gọi mua hàng
-        # Clip giữa (nếu >2): CHI TIẾT BỔ SUNG - Zoom vào đặc điểm nổi bật
-
-        storyline_context = (
-            f"VIDEO STORYLINE: This is clip {segment_index + 1} of {total_segments} in a TikTok product review series. "
-        )
-        if segment_index == 0:
-            storyline_context += "This clip is the HOOK — grab attention and show close-up product details. "
-        elif segment_index == total_segments - 1:
-            storyline_context += "This clip is the FINALE — show the product being worn/used and end with a confident call-to-action pose. "
-        else:
-            storyline_context += "This clip shows ADDITIONAL DETAILS — highlight standout features and quality. "
+        desc_hint = f"({clean_desc}) " if clean_desc else ""
         
-        storyline_context += (
-            f"IMPORTANT: The same person ({subject.lower()}) appears in ALL clips with consistent appearance, "
-            "same setting style, same warm lighting, same fashion aesthetic throughout. "
-        )
+        music_name = self._pick_consistent_music(product_name)
+        music_rule = f"Background music: {music_name} or similar V-pop trending song, upbeat, clearly audible. "
 
+        # ============================================================
+        # CLIP 1: UNBOXING + HANDS-ON REVIEW (cầm, sờ, lật, zoom)
+        # ============================================================
         if segment_index == 0:
             if prod_type == "clothing":
                 return (
-                    f"{storyline_context}"
-                    f"Viral TikTok OOTD outfit-check video clip, 9:16 vertical, cinematic aesthetic. "
-                    f"{desc_hint}"
-                    f"Product: '{cleaned_name}' clothing (reference image provided). "
-                    f"{subject} in a bright aesthetic room with warm lighting. "
-                    f"{pronoun} holds the clothing item close to camera, showing fabric texture and design details with a natural smile. "
-                    f"Quick smooth cuts: close-up of fabric, label, stitching detail. Natural relaxed expression, not scripted. "
-                    f"{music_instruction}"
-                    f"Soft Vietnamese voiceover blended with music: '{voiceover_line}' "
-                    "No text, no watermark. Duration 10 seconds."
+                    f"TikTok product review video, 9:16 vertical, warm cinematic lighting. "
+                    f"Product: '{cleaned_name}' {desc_hint}(use reference image). "
+                    f"Scene: {subject} sitting at a clean aesthetic desk/table. "
+                    f"Action sequence: {pronoun} picks up the folded clothing from a minimal box, "
+                    f"unfolds it and holds it up to show the full design. "
+                    f"Camera zooms into {possessive} hands touching the fabric texture (macro close-up of weaving pattern). "
+                    f"Then {pronoun.lower()} flips the collar/tag to show the label, runs fingers along the stitching. "
+                    f"Facial expression: genuinely impressed, nodding with a smile. "
+                    f"{music_rule}"
+                    f"Vietnamese voiceover (natural, blended with music): '{voiceover_line}' "
+                    "No text overlay, no watermark. Duration 10 seconds."
                 )
             elif prod_type == "footwear":
                 return (
-                    f"{storyline_context}"
-                    f"Viral TikTok shoe haul video clip, 9:16 vertical, aesthetic style. "
-                    f"{desc_hint}"
-                    f"Product: '{cleaned_name}' footwear (reference image provided). "
-                    f"{subject} in a stylish setting holds the shoes close to camera. "
-                    "Quick aesthetic cuts: shoe sole detail, side profile, material close-up. Natural delighted expression. "
-                    f"{music_instruction}"
-                    f"Soft Vietnamese voiceover blended with music: '{voiceover_line}' "
-                    "No text, no watermark. Duration 10 seconds."
+                    f"TikTok shoe review video, 9:16 vertical, warm cinematic lighting. "
+                    f"Product: '{cleaned_name}' {desc_hint}(use reference image). "
+                    f"Scene: {subject} sitting, takes the shoes out of the box. "
+                    f"Action sequence: {pronoun} holds one shoe close to camera, tilts it to show the side profile and sole. "
+                    f"Camera zooms into the sole texture (macro), then {pronoun.lower()} presses the insole with {possessive} thumb showing cushion softness. "
+                    f"Runs finger along the stitching/seam for quality check. "
+                    f"Facial expression: pleasantly surprised, nodding approvingly. "
+                    f"{music_rule}"
+                    f"Vietnamese voiceover (natural, blended with music): '{voiceover_line}' "
+                    "No text overlay, no watermark. Duration 10 seconds."
                 )
             else:
                 return (
-                    f"{storyline_context}"
-                    f"Viral TikTok product unboxing clip, 9:16 vertical, aesthetic style. "
-                    f"{desc_hint}"
-                    f"Product: '{cleaned_name}' (reference image provided). "
-                    f"{subject} holds the product near camera showing design and features. "
-                    "Quick aesthetic cuts: product detail close-ups, packaging, key features. Natural happy expression. "
-                    f"{music_instruction}"
-                    f"Soft Vietnamese voiceover blended with music: '{voiceover_line}' "
-                    "No text, no watermark. Duration 10 seconds."
+                    f"TikTok product unboxing review, 9:16 vertical, warm cinematic lighting. "
+                    f"Product: '{cleaned_name}' {desc_hint}(use reference image). "
+                    f"Scene: {subject} at a clean desk, opens the product packaging. "
+                    f"Action sequence: {pronoun} takes the product out, holds it up to camera showing all angles. "
+                    f"Camera zooms into key design details (buttons, ports, material texture — macro close-up). "
+                    f"{pronoun} tests weight in hand, touches surface finish. "
+                    f"Facial expression: genuinely impressed, examining with curiosity. "
+                    f"{music_rule}"
+                    f"Vietnamese voiceover (natural, blended with music): '{voiceover_line}' "
+                    "No text overlay, no watermark. Duration 10 seconds."
                 )
 
+        # ============================================================
+        # CLIP 2 (CUỐI): TRY-ON / DEMO IN ACTION + CTA
+        # ============================================================
         elif segment_index == total_segments - 1:
             if prod_type == "clothing":
                 return (
-                    f"{storyline_context}"
-                    f"Viral TikTok OOTD try-on video clip, 9:16 vertical, aesthetic cinematic style. "
-                    f"Product: '{cleaned_name}' outfit (same item from the previous review clip). "
-                    f"{subject} is now WEARING the outfit in the same well-lit aesthetic setting. "
-                    f"{pronoun} does a natural 360 spin showing the full outfit, walks gracefully towards camera, poses confidently with a bright smile. "
-                    "Multiple smooth aesthetic cuts: full body shot, waist detail, side profile. "
-                    f"{music_instruction}"
-                    f"Soft Vietnamese voiceover with music: '{voiceover_line}' "
-                    "No text, no watermark. Duration 10 seconds."
+                    f"TikTok outfit try-on video, 9:16 vertical, bright natural lighting. "
+                    f"Product: '{cleaned_name}' outfit being worn. "
+                    f"Scene: {subject} standing in a well-lit room (full-body mirror visible or clean background). "
+                    f"Action sequence: {pronoun} is already WEARING the outfit. "
+                    f"Starts with a confident walk towards camera (3 steps), stops, does a smooth 360 spin, "
+                    f"then strikes a relaxed fashion pose (hand on hip or adjusting collar). "
+                    f"Camera angle: starts medium shot, pulls slightly wider for full body reveal. "
+                    f"Facial expression: confident bright smile, looking directly at camera at the end. "
+                    f"{music_rule}"
+                    f"Vietnamese voiceover (natural, blended with music): '{voiceover_line}' "
+                    "No text overlay, no watermark. Duration 10 seconds."
                 )
             elif prod_type == "footwear":
                 return (
-                    f"{storyline_context}"
-                    f"Viral TikTok shoe try-on video clip, 9:16 vertical, aesthetic style. "
-                    f"Product: '{cleaned_name}' footwear (same pair from the previous review clip). "
-                    f"{subject} is now WEARING the shoes, walking gracefully in the same stylish setting. "
-                    "Smooth aesthetic cuts: feet/shoes walking, full outfit from ground up, close-up of shoes in motion. "
-                    f"{music_instruction}"
-                    f"Soft Vietnamese voiceover with music: '{voiceover_line}' "
-                    "No text, no watermark. Duration 10 seconds."
+                    f"TikTok shoe try-on video, 9:16 vertical, bright natural lighting. "
+                    f"Product: '{cleaned_name}' shoes being worn. "
+                    f"Scene: {subject} standing, shoes already ON feet. "
+                    f"Action sequence: Camera starts LOW at foot level showing the shoes in detail, "
+                    f"then slowly tilts up revealing the full outfit. "
+                    f"{pronoun} takes a few stylish steps forward, camera follows the walking feet, "
+                    f"then {pronoun.lower()} stops and does a small confident bounce/pose. "
+                    f"Facial expression: happy and satisfied, looking down at shoes then smiling at camera. "
+                    f"{music_rule}"
+                    f"Vietnamese voiceover (natural, blended with music): '{voiceover_line}' "
+                    "No text overlay, no watermark. Duration 10 seconds."
                 )
             else:
                 return (
-                    f"{storyline_context}"
-                    f"Viral TikTok product demo clip, 9:16 vertical, aesthetic style. "
-                    f"Product: '{cleaned_name}' (same item from the previous review clip). "
-                    f"{subject} demonstrates USING the product with genuine delight and satisfaction. "
-                    "Smooth aesthetic cuts: product in use, feature highlights, happy reaction shots. "
-                    f"{music_instruction}"
-                    f"Soft Vietnamese voiceover with music: '{voiceover_line}' "
-                    "No text, no watermark. Duration 10 seconds."
+                    f"TikTok product demo video, 9:16 vertical, bright natural lighting. "
+                    f"Product: '{cleaned_name}' being USED in action. "
+                    f"Scene: {subject} actively using/demonstrating the product in a real setting. "
+                    f"Action sequence: {pronoun} powers on/activates the product, shows it working. "
+                    f"Camera captures the product in action with genuine reaction shots. "
+                    f"Then {pronoun.lower()} holds the product towards camera with a thumbs-up or satisfied nod. "
+                    f"Facial expression: delighted, genuinely happy with the result. "
+                    f"{music_rule}"
+                    f"Vietnamese voiceover (natural, blended with music): '{voiceover_line}' "
+                    "No text overlay, no watermark. Duration 10 seconds."
                 )
 
+        # ============================================================
+        # CLIP GIỮA (nếu >2 clips): CHI TIẾT BỔ SUNG
+        # ============================================================
         else:
-            # Segment giữa: chi tiết bổ sung
             if prod_type == "clothing":
-                detail_action = f"{pronoun} shows close-up of stitching quality, fabric stretch test, and how the material drapes naturally."
+                return (
+                    f"TikTok clothing detail video, 9:16 vertical, soft studio lighting. "
+                    f"Product: '{cleaned_name}'. "
+                    f"{subject} stretches the fabric to show elasticity, flips it inside-out showing lining quality. "
+                    f"Macro camera shots of button details, zipper quality, collar shape. "
+                    f"{music_rule}"
+                    f"Vietnamese voiceover: '{voiceover_line}' "
+                    "No text, no watermark. Duration 10 seconds."
+                )
             elif prod_type == "footwear":
-                detail_action = f"{pronoun} shows close-up of sole grip, cushioning detail, and how the shoe fits on foot."
+                return (
+                    f"TikTok shoe detail video, 9:16 vertical, soft studio lighting. "
+                    f"Product: '{cleaned_name}'. "
+                    f"{subject} bends the sole to show flexibility, removes insole showing cushion layer. "
+                    f"Macro camera shots of sole grip pattern, heel construction, lace/strap quality. "
+                    f"{music_rule}"
+                    f"Vietnamese voiceover: '{voiceover_line}' "
+                    "No text, no watermark. Duration 10 seconds."
+                )
             else:
-                detail_action = f"{pronoun} shows close-up of product build quality, key feature demonstration, and size/weight in hand."
-            return (
-                f"{storyline_context}"
-                f"TikTok product detail review clip, 9:16 vertical, aesthetic cinematic style. "
-                f"Product: '{cleaned_name}' (same item, same person, same setting as other clips). "
-                f"{subject} continues the review. {detail_action} "
-                "Natural genuine expression showing satisfaction with the quality. "
-                f"{music_instruction}"
-                f"Soft Vietnamese voiceover with music: '{voiceover_line}' "
-                "No text, no watermark. Duration 10 seconds."
-            )
+                return (
+                    f"TikTok product detail video, 9:16 vertical, soft studio lighting. "
+                    f"Product: '{cleaned_name}'. "
+                    f"{subject} demonstrates a specific feature of the product, showing build quality and functionality. "
+                    f"Macro camera shots of material, buttons, ports, or key differentiating features. "
+                    f"{music_rule}"
+                    f"Vietnamese voiceover: '{voiceover_line}' "
+                    "No text, no watermark. Duration 10 seconds."
+                )
 
     def _build_safe_fallback_prompt(self, product_name: str, segment_index: int, total_segments: int) -> str:
         """Prompt dự phòng an toàn: chỉ sản phẩm + nhạc nền, không người, đảm bảo qua safety filter."""
@@ -1155,6 +1161,10 @@ class GeminiVideoGenerator:
                         if current_responses.count() > initial_response_count:
                             latest_text = (current_responses.nth(current_responses.count() - 1).text_content() or "").strip()
                             
+                            if self._check_subscription_required(latest_text):
+                                logger.error("❌ Tài khoản Gemini này chưa có hoặc hết hạn subscription Pro/Advanced!")
+                                raise RuntimeError("GEMINI_SUBSCRIPTION_REQUIRED")
+
                             if self._check_daily_limit(latest_text):
                                 logger.error("❌ Hết giới hạn tạo video trong ngày cho tài khoản này!")
                                 raise RuntimeError("GEMINI_DAILY_LIMIT_EXCEEDED")
