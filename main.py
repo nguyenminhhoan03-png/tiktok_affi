@@ -256,6 +256,15 @@ def determine_product_type(product_name: str) -> str:
     footwear_keywords = [
         "giày", "dép", "sandal", "guốc", "sneaker", "boot", "boots", "slippers", "sục"
     ]
+    cosmetics_keywords = [
+        "son", "lip", "balm", "môi", "kem chống nắng", "kem dưỡng", "mỹ phẩm", "serum", "phấn", 
+        "cọ", "nước hoa", "lotion", "sữa rửa mặt", "toner", "mascara", "eyeliner", 
+        "cushion", "tẩy trang", "chống nắng", "sunscreen"
+    ]
+    electronics_keywords = [
+        "tai nghe", "loa", "sạc", "cáp", "ốp lưng", "bàn phím", "chuột", 
+        "đồng hồ", "quạt tích điện", "quạt mini", "điện thoại"
+    ]
     
     for kw in clothing_keywords:
         if kw in name_lower:
@@ -263,64 +272,41 @@ def determine_product_type(product_name: str) -> str:
     for kw in footwear_keywords:
         if kw in name_lower:
             return "footwear"
+    for kw in cosmetics_keywords:
+        if kw in name_lower:
+            return "cosmetics"
+    for kw in electronics_keywords:
+        if kw in name_lower:
+            return "electronics"
+
     return "general"
 
 
 def clean_product_name(product_name: str) -> str:
-    """Rút gọn tên sản phẩm dài dòng từ TikTok Shop thành tên sản phẩm cốt lõi ngắn gọn để AI tập trung render."""
+    """Giữ lại tên sản phẩm chính xác và đầy đủ (loại bỏ ký tự rác nếu quá dài) để AI hiểu đúng sản phẩm."""
     if not product_name:
-        return "sản phẩm"
+        return "Sản phẩm Affiliate"
     
-    name_lower = product_name.lower()
+    # Làm sạch khoảng trắng thừa và ký tự đặc biệt ở đầu/cuối
+    cleaned = product_name.strip()
+    words = cleaned.split()
     
-    # 1. Tìm các từ khóa thời trang/giày dép, công nghệ, gia dụng phổ biến để lấy cụm từ cốt lõi
-    core_keywords = [
-        # Thời trang & Giày dép
-        "váy dự tiệc", "váy công sở", "váy tiểu thư", "váy dáng dài", "váy xòe", "váy",
-        "đầm dự tiệc", "đầm công sở", "đầm tiểu thư", "đầm dáng dài", "đầm",
-        "áo sơ mi", "áo thun", "áo phông", "áo khoác", "áo croptop", "áo hoodie", "áo len", "áo nỉ", "áo",
-        "quần jeans", "quần jean", "quần tây", "quần short", "quần dài", "quần",
-        "set bộ", "set đồ", "bộ quần áo",
-        "giày sneaker", "giày cao gót", "giày tây", "giày thể thao", "giày",
-        "dép quai ngang", "dép sandal", "dép", "sandal", "guốc",
-        # Đồ công nghệ
-        "tai nghe bluetooth", "tai nghe không dây", "tai nghe", "loa bluetooth", "loa không dây", "loa",
-        "sạc dự phòng", "củ sạc nhanh", "củ sạc", "cáp sạc", "dây sạc", "chuột không dây", "chuột máy tính",
-        "bàn phím cơ", "bàn phím bluetooth", "bàn phím", "quạt tích điện", "quạt mini", "quạt",
-        "ốp lưng", "kính cường lực", "giá đỡ điện thoại",
-        # Mỹ phẩm & Chăm sóc cá nhân
-        "kem chống nắng", "sữa rửa mặt", "nước hoa", "son kem", "son thỏi", "son môi", "son",
-        "serum dưỡng da", "serum", "kem dưỡng ẩm", "kem dưỡng", "tẩy trang",
-        # Gia dụng & Đồ dùng khác
-        "nồi chiên không dầu", "máy xay sinh tố", "bình giữ nhiệt", "quạt để bàn", "đèn học chống cận", "đèn học",
-        "kệ để đồ", "hộp đựng thức ăn"
-    ]
-    
-    for kw in core_keywords:
-        if kw in name_lower:
-            idx = name_lower.find(kw)
-            words = product_name[idx:].split()
-            cleaned = " ".join(words[:3])
-            return cleaned.rstrip(",.-/()[]{} ")
+    # Nếu tên sản phẩm quá dài (> 12 từ), giữ lại 10 từ đầu tiên để đầy đủ tên sản phẩm & model
+    if len(words) > 12:
+        cleaned = " ".join(words[:10]).rstrip(",.-/()[]{} ")
+        
+    return cleaned
 
-    # 2. Nếu không khớp từ khóa đặc biệt nào, lấy 5 từ đầu tiên của tên sản phẩm
-    words = product_name.split()
-    if len(words) > 5:
-        return " ".join(words[:5]).rstrip(",.-/()[]{} ")
-    return product_name
 
 
 def build_auto_prompt(product_name: str, product_description: str | None = None) -> str:
+    """
+    Sinh prompt ngắn gọn, visual-first kèm voiceover và nhạc nền chuẩn cho Gemini Video.
+    Tự động tối ưu theo từng nhóm ngành hàng (Mỹ phẩm, Thời trang, Giày dép, Công nghệ, Đồ gia dụng).
+    """
     prod_type = determine_product_type(product_name)
     cleaned_name = clean_product_name(product_name)
-    
-    # Chuẩn bị thông tin chi tiết sản phẩm nếu có để đưa vào prompt
-    detail_prompt = ""
-    if product_description:
-        clean_desc = " ".join(product_description.split())
-        detail_prompt = f" Focus the showcase on these details and features: {clean_desc[:250]}."
 
-    # Kiểm tra xem sản phẩm có phải cho nam giới không
     name_lower = product_name.lower()
     desc_lower = (product_description or "").lower()
     name_for_check = name_lower.replace("việt nam", "").replace("vietnam", "").replace("viet nam", "")
@@ -332,40 +318,69 @@ def build_auto_prompt(product_name: str, product_description: str | None = None)
             is_male = True
             break
 
-    model_gender = "male model" if is_male else "female model"
+    model_gender = "male" if is_male else "female"
+    subject = "stylish young Vietnamese man" if is_male else "stylish young Vietnamese woman"
+
+    # Chọn bài nhạc nền phù hợp với seed tên sản phẩm
+    trending_songs = [
+        "'Waiting For You' của MONO",
+        "'See Tình' của Hoàng Thùy Linh",
+        "'Có Hẹn Với Thanh Xuân' của MONSTAR",
+        "'Ngắm Hoa Lệ Rơi' phong cách remix TikTok",
+        "'Đừng Làm Trái Tim Anh Đau' của Sơn Tùng MTP",
+        "'Em Là' của GREY D",
+        "'Là Anh' của Phạm Lịch",
+        "'Dù Cho Tận Thế' phong cách lofi chill",
+        "'Cắt Đôi Nỗi Sầu' của Tăng Duy Tân remix",
+        "'Ghé Qua' của Dick x PC",
+    ]
+    seed = sum(ord(c) for c in (product_name or "product"))
+    music_name = trending_songs[seed % len(trending_songs)]
+    music_rule = f"Background music: {music_name} (upbeat, clearly audible). "
+
+    addr = "anh em" if is_male else "chị em"
+    addr2 = "cả nhà" if is_male else "mọi người"
 
     if prod_type == "clothing":
-        logger.info(f"👕 Sản phẩm thuộc nhóm Thời trang. Áp dụng prompt Review chi tiết sản phẩm.")
-        return (
-            f"A high-quality fashion showcase video, 9:16 vertical ratio, cinematic aesthetic style. "
-            f"Product: '{cleaned_name}' fashion item (use the uploaded reference image).{detail_prompt} "
-            f"Show a {model_gender} wearing the outfit and walking in a bright, clean, aesthetic room. "
-            "Video style: Focus on the design, fabric texture, seams, fit, and movement of the clothing. "
-            "Camera movement: smooth handheld, close-up shots of fabric details and full-body fit shots. "
-            "No speech in the video. Silent video. No text overlays, no watermarks. Duration 10 seconds."
+        vo = f"Review thực tế mẫu {cleaned_name} đang siêu hot này nha! Cầm lên sờ thử chất vải mềm mịn, đường may tỉ mỉ form chuẩn đét luôn."
+        visual = (
+            f"Cinematic 9:16 TikTok fashion video. "
+            f"A {subject} wearing '{cleaned_name}' "
+            f"walks confidently in a bright minimal studio. "
+            "Smooth slow-motion handheld camera, soft warm lighting, close-up on fabric texture and flowing silhouette."
         )
     elif prod_type == "footwear":
-        logger.info(f"👟 Sản phẩm thuộc nhóm Giày dép. Áp dụng prompt Review chi tiết giày dép.")
-        return (
-            f"A high-quality footwear showcase video, 9:16 vertical ratio, cinematic aesthetic style. "
-            f"Product: '{cleaned_name}' footwear (use the uploaded reference image).{detail_prompt} "
-            "Show the shoes in a clean, modern, aesthetic setting. "
-            "Video style: Focus on the design details, texture, sole, and style of the footwear. "
-            "Camera movement: smooth close-up shots of the shoe features. "
-            "No speech in the video. Silent video. No text overlays, no watermarks. Duration 10 seconds."
+        vo = f"Review đôi {cleaned_name} siêu cháy cho {addr} nè! Cầm lên là thấy da mịn, đế chắc chắn, form gọn gàng tôn dáng cực kỳ."
+        visual = (
+            f"Cinematic 9:16 TikTok shoe showcase. "
+            f"Camera starts at floor level revealing '{cleaned_name}' "
+            f"on a {subject}'s feet walking elegantly on a clean floor. "
+            "Slow-motion macro close-up of sole material and design detail, warm natural studio lighting."
+        )
+    elif prod_type == "cosmetics":
+        vo = f"Tôi cầm cái {cleaned_name} này lên mà thấy đáng tiền ngay — thiết kế gọn, chất son mượt đỉnh cao!"
+        visual = (
+            f"TikTok product unboxing, 9:16 vertical, warm cinematic lighting, cozy beauty vlog vibe. "
+            f"A {subject} gently holds '{cleaned_name}' near her cheek, showing texture and sleek packaging. "
+            "Macro extreme close-up on packaging details, reaction: genuinely impressed, nodding with a warm smile."
+        )
+    elif prod_type == "electronics":
+        vo = f"Unbox em {cleaned_name} công nghệ siêu nét này {addr2}! Thiết kế hiện đại, cầm chắc tay, độ hoàn thiện tỉ mỉ cực kỳ."
+        visual = (
+            f"TikTok tech unboxing, 9:16 vertical, sleek modern studio lighting. "
+            f"A {subject} unboxes '{cleaned_name}' on a clean wooden desk, holding it up to reveal build quality. "
+            "Macro close-up on buttons, metallic finish and sleek design details with a satisfied smile."
         )
     else:
-        logger.info(f"📦 Sản phẩm thuộc nhóm Đồ vật/Khác. Áp dụng prompt Review chi tiết sản phẩm.")
-        return (
-            f"A high-quality product presentation video, 9:16 vertical ratio, cinematic aesthetic style. "
-            f"Product: '{cleaned_name}' (use the uploaded reference image).{detail_prompt} "
-            "Show the product features and quality in a bright, clean, modern room. "
-            "Video style: Demonstration of the product utility and details. "
-            "Camera movement: smooth focused close-ups of the product. "
-            "No speech in the video. Silent video. No text overlays, no watermarks. Duration 10 seconds."
+        vo = f"Tôi cầm cái {cleaned_name} này lên mà thấy đáng tiền ngay — thiết kế gọn, chất tốt cực kỳ!"
+        visual = (
+            f"TikTok product unboxing, 9:16 vertical, warm cinematic lighting. "
+            f"A {subject} takes '{cleaned_name}' out of packaging and holds it up showing all angles. "
+            "Macro close-up on key design details, reaction: genuinely impressed, nodding with a smile."
         )
 
-
+    voiceover = f"Vietnamese voiceover (natural, warm): '{vo}'"
+    return f"{visual} {music_rule}{voiceover}"
 
 
 def update_job_in_file(jobs_path: Path, target_job: dict, status: str, error_msg: str | None = None):
@@ -504,6 +519,28 @@ def run_pipeline():
         if not product_name:
             product_name = "Sản phẩm Affiliate"
 
+        num_segments = job.get("video_segments", 1)
+
+        # Sử dụng LLM API (Gemini 3.6 Flash / Vilao AI) để tạo kịch bản, visual prompts & caption hấp dẫn
+        custom_prompts = None
+        try:
+            from src.script_generator import generate_script_with_llm
+            llm_script = generate_script_with_llm(product_name, product_description, num_segments)
+            if llm_script:
+                if llm_script.get("visual_prompts"):
+                    custom_prompts = llm_script.get("visual_prompts")
+                    prompt = custom_prompts[0]
+                
+                # Cập nhật caption với giọng đọc và caption chất lượng từ LLM
+                vo = llm_script.get("voiceover", "")
+                cap_text = llm_script.get("caption", "")
+                if vo and (not caption or caption.lower() == "auto"):
+                    caption = f"{vo}\n\n{cap_text}" if cap_text else vo
+                elif cap_text and (not caption or caption.lower() == "auto"):
+                    caption = cap_text
+        except Exception as e:
+            logger.warning(f"⚠️ Lỗi khi gọi LLM script generator: {e}")
+
         # Tự động sinh Prompt nếu chọn "auto" hoặc để trống
         if not prompt or prompt.lower() == "auto":
             prompt = build_auto_prompt(product_name, product_description)
@@ -520,7 +557,6 @@ def run_pipeline():
         # --- BƯỚC 1 & 2: Render video ---
         # Gemini engine (Kling đã được loại bỏ)
         logger.info("🤖 Bắt đầu render video qua Google Gemini...")
-        num_segments = job.get("video_segments", 1)
         if num_segments > 1:
             logger.info(f"🎬 Chế độ multi-segment: sẽ render {num_segments} clip rồi ghép lại.")
             
@@ -546,9 +582,10 @@ def run_pipeline():
                             image_path=temp_image_path,
                             num_segments=num_segments,
                             product_description=product_description,
+                            custom_prompts=custom_prompts,
                         )
                     else:
-                        video_path = generator.generate_video(prompt, image_path=temp_image_path, product_name=product_name)
+                        video_path = generator.generate_video(prompt, image_path=temp_image_path, product_name=product_name, product_description=product_description)
                     
                     try:
                         updated_cookies = context.cookies()
@@ -560,14 +597,34 @@ def run_pipeline():
                     break
             except Exception as e:
                 err_str = str(e)
-                is_expired = (
+                is_retryable = (
                     "GEMINI_DAILY_LIMIT_EXCEEDED" in err_str 
                     or "GEMINI_SUBSCRIPTION_REQUIRED" in err_str
                     or "session hết hạn" in err_str 
                     or "chưa đăng nhập" in err_str
+                    or "Opening in existing browser session" in err_str
+                    or "Target closed" in err_str
+                    or "Target page" in err_str
+                    or "Timeout" in err_str
                 )
-                if is_expired:
-                    logger.warning(f"⚠️ Tài khoản Google hiện tại hết hạn hoặc hết giới hạn tạo video: {e}")
+                if is_retryable or rot_idx < max_account_rotations - 1:
+                    logger.warning(f"⚠️ Lỗi render từ Gemini với tài khoản hiện tại: {e}")
+                    
+                    if rot_idx == max_account_rotations - 1:
+                        logger.error("❌ Đã thử hết tất cả các tài khoản Google mà không thành công!")
+                        update_job_in_file(jobs_path, job, "failed", f"Lỗi render: {e}")
+                        break
+                    
+                    rotated = google_manager.rotate_account()
+                    if rotated:
+                        logger.info("🔄 Đang chuyển sang tài khoản Google tiếp theo để thử lại...")
+                        import time
+                        time.sleep(2)
+                        continue
+                    else:
+                        logger.error("❌ Không còn tài khoản Google dự phòng nào khác!")
+                        update_job_in_file(jobs_path, job, "failed", f"Lỗi render: {e}")
+                        break
                     
                     if rot_idx == max_account_rotations - 1:
                         logger.error("❌ Đã thử hết tất cả các tài khoản Google mà không thành công!")

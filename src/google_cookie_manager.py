@@ -203,6 +203,23 @@ class GoogleCookieManager:
                 except Exception:
                     pass
 
+    def _cleanup_profile_locks(self, profile_path: Path):
+        """Dọn dẹp lock files và pkill các tiến trình Chrome cũ đang ngậm profile để tránh lỗi Opening in existing browser session."""
+        import subprocess, time
+        try:
+            subprocess.run(["pkill", "-9", "-f", profile_path.name], check=False)
+            time.sleep(0.5)
+        except Exception:
+            pass
+
+        for lock_name in ["SingletonLock", "SingletonCookie", "SingletonSocket"]:
+            lf = profile_path / lock_name
+            if lf.exists() or lf.is_symlink():
+                try:
+                    lf.unlink()
+                except Exception:
+                    pass
+
     def load_context_with_cookies(self, playwright: Playwright, headless: bool = False):
         """Tạo browser context với Google session.
 
@@ -227,7 +244,8 @@ class GoogleCookieManager:
                     index = 0
                 
                 import shutil
-                shutil.copy(json_files[index], self.cookies_path)
+                if json_files[index].resolve() != Path(self.cookies_path).resolve():
+                    shutil.copy(json_files[index], self.cookies_path)
                 logger.info(f"👤 Tài khoản Google hiện tại: {json_files[index].name}")
 
         active_profile_dir = self.get_profile_dir()
@@ -241,8 +259,9 @@ class GoogleCookieManager:
         else:
             logger.info(f"✅ Dùng Chrome profile có sẵn session (như trình duyệt thật): {active_profile_dir}")
         
-        # Đảm bảo thư mục profile tồn tại
+        # Đảm bảo thư mục profile tồn tại và dọn dẹp lock cũ
         profile_path.mkdir(parents=True, exist_ok=True)
+        self._cleanup_profile_locks(profile_path)
         
         context = playwright.chromium.launch_persistent_context(
             user_data_dir=active_profile_dir,
