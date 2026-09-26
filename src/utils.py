@@ -375,3 +375,69 @@ def get_bg_music_track(config_music_path: str | None = None) -> str | None:
     if music_files:
         return str(music_files[0])
     return None
+
+
+def check_and_wait_for_captcha(page, max_wait_sec: int = 180) -> bool:
+    """
+    Tự động kiểm tra xem trình duyệt có đang hiển thị Captcha hay Yêu cầu xác minh bảo mật (TikTok/Google).
+    Nếu có Captcha:
+    - In thông báo hướng dẫn rõ ràng trên log.
+    - Tự động vòng lặp kiểm tra (polling) cho đến khi người dùng giải Captcha xong trên trình duyệt Chromium.
+    - Ngay khi người dùng giải xong và Captcha biến mất, hàm trả về True để tiếp tục chạy các bước tiếp theo ngay lập tức mà KHÔNG cần bấm Enter trên terminal/GUI.
+    """
+    import time
+
+    captcha_selectors = [
+        '#captcha-verify-image',
+        '.sec-captcha-container',
+        '[class*="captcha" i]',
+        '[id*="captcha" i]',
+        'iframe[src*="captcha"]',
+        'div[class*="verify-container"]',
+        'div:has-text("Verify to continue")',
+        'div:has-text("Xác minh")',
+        'div:has-text("Security Check")',
+        '#captcha_container',
+        '.captcha-verify-container'
+    ]
+    
+    captcha_url_keywords = ["sec.tiktok.com", "captcha", "security_check", "verify_container"]
+
+    def is_captcha_present() -> bool:
+        try:
+            current_title = (page.title() or "").lower()
+            current_url = (page.url or "").lower()
+            if any(kw in current_title for kw in captcha_url_keywords) or any(kw in current_url for kw in captcha_url_keywords):
+                return True
+            for sel in captcha_selectors:
+                try:
+                    loc = page.locator(sel)
+                    if loc.count() > 0 and loc.first.is_visible():
+                        return True
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return False
+
+    if not is_captcha_present():
+        return False
+
+    logger.warning("⚠️ [PHÁT HIỆN CAPTCHA / XÁC MINH BẢO MẬT] Trình duyệt đang yêu cầu giải Captcha!")
+    logger.warning("👉 Hãy chuyển sang cửa sổ trình duyệt Chrome đang mở và thực hiện kéo mảnh ghép / giải Captcha.")
+    logger.warning("⏳ Hệ thống đang tự động theo dõi... Ngay khi bạn giải xong, tool sẽ TỰ ĐỘNG CHẠY TIẾP!")
+
+    start_time = time.time()
+    while time.time() - start_time < max_wait_sec:
+        time.sleep(2)
+        if not is_captcha_present():
+            logger.info("🎉 TỰ ĐỘNG PHÁT HIỆN GIẢI CAPTCHA THÀNH CÔNG! Đang tiếp tục xử lý pipeline...")
+            try:
+                page.wait_for_timeout(3000)
+            except Exception:
+                pass
+            return True
+
+    logger.warning(f"⚠️ Hết thời gian chờ tự động ({max_wait_sec}s). Vẫn thử tiếp tục quy trình...")
+    return False
+

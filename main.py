@@ -84,6 +84,30 @@ def export_google_cookies(account):
 
 
 # ─────────────────────────────────────────────────────────────
+# Lệnh mới: Khởi chạy Giao diện Web UI Dashboard
+# ─────────────────────────────────────────────────────────────
+@cli.command("web-ui")
+@click.option("--port", default=5000, help="Cổng chạy Web UI Dashboard (mặc định 5000)")
+@click.option("--host", default="0.0.0.0", help="Host chạy Web UI Dashboard")
+def web_ui(port, host):
+    """Khởi chạy giao diện Web Dashboard quản lý Jobs & Pipeline trực quan"""
+    from web_ui.server import run_server
+    logger.info(f"🌐 Đang khởi chạy TikTok Dashboard Web UI tại: http://localhost:{port}")
+    run_server(port=port, host=host)
+
+
+# ─────────────────────────────────────────────────────────────
+# Lệnh mới: Khởi chạy Giao diện Desktop Software (PyQt6 GUI App)
+# ─────────────────────────────────────────────────────────────
+@cli.command("gui")
+def gui():
+    """Khởi chạy phần mềm giao diện Desktop (GUI App) độc lập"""
+    from gui_app import run_gui
+    logger.info("🖥️ Đang khởi chạy Phần mềm Desktop TikTok Studio Auto Uploader...")
+    run_gui()
+
+
+# ─────────────────────────────────────────────────────────────
 # Lệnh 3: Upload 1 video cụ thể
 # ─────────────────────────────────────────────────────────────
 @cli.command("upload")
@@ -301,7 +325,7 @@ def clean_product_name(product_name: str) -> str:
 
 def build_auto_prompt(product_name: str, product_description: str | None = None) -> str:
     """
-    Sinh prompt ngắn gọn, visual-first kèm voiceover và nhạc nền chuẩn cho Gemini Video.
+    Sinh prompt ngắn gọn, visual-first kèm voiceover chuẩn cho Gemini Video.
     Tự động tối ưu theo từng nhóm ngành hàng (Mỹ phẩm, Thời trang, Giày dép, Công nghệ, Đồ gia dụng).
     """
     prod_type = determine_product_type(product_name)
@@ -320,23 +344,6 @@ def build_auto_prompt(product_name: str, product_description: str | None = None)
 
     model_gender = "male" if is_male else "female"
     subject = "stylish young Vietnamese man" if is_male else "stylish young Vietnamese woman"
-
-    # Chọn bài nhạc nền phù hợp với seed tên sản phẩm
-    trending_songs = [
-        "'Waiting For You' của MONO",
-        "'See Tình' của Hoàng Thùy Linh",
-        "'Có Hẹn Với Thanh Xuân' của MONSTAR",
-        "'Ngắm Hoa Lệ Rơi' phong cách remix TikTok",
-        "'Đừng Làm Trái Tim Anh Đau' của Sơn Tùng MTP",
-        "'Em Là' của GREY D",
-        "'Là Anh' của Phạm Lịch",
-        "'Dù Cho Tận Thế' phong cách lofi chill",
-        "'Cắt Đôi Nỗi Sầu' của Tăng Duy Tân remix",
-        "'Ghé Qua' của Dick x PC",
-    ]
-    seed = sum(ord(c) for c in (product_name or "product"))
-    music_name = trending_songs[seed % len(trending_songs)]
-    music_rule = f"Background music: {music_name} (upbeat, clearly audible). "
 
     addr = "anh em" if is_male else "chị em"
     addr2 = "cả nhà" if is_male else "mọi người"
@@ -380,7 +387,7 @@ def build_auto_prompt(product_name: str, product_description: str | None = None)
         )
 
     voiceover = f"Vietnamese voiceover (natural, warm): '{vo}'"
-    return f"{visual} {music_rule}{voiceover}"
+    return f"{visual} {voiceover}"
 
 
 def update_job_in_file(jobs_path: Path, target_job: dict, status: str, error_msg: str | None = None):

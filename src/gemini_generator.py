@@ -122,6 +122,9 @@ class GeminiVideoGenerator:
             logger.warning(f"⚠️ Cảnh báo khi load trang Gemini: {e}")
         self._delay()
         self._close_overlays()
+
+        from src.utils import check_and_wait_for_captcha
+        check_and_wait_for_captcha(self.page, max_wait_sec=180)
  
         # Check xem đã login chưa — thử tối đa 2 lần (lần 2 reload lại trang)
         max_login_checks = 2
@@ -568,7 +571,7 @@ class GeminiVideoGenerator:
         return False
 
     def _check_daily_limit(self, text: str) -> bool:
-        """Kiểm tra xem Gemini có báo hết lượt tạo video trong ngày không."""
+        """Kiểm tra xem Gemini có báo hết lượt / chạm trần giới hạn tạo video của tài khoản không."""
         daily_limit_keywords = [
             "can't generate more videos for you today",
             "cannot generate more videos for you today",
@@ -578,6 +581,10 @@ class GeminiVideoGenerator:
             "reached your daily limit",
             "reached the daily limit",
             "daily limit for video",
+            "as soon as your limit resets",
+            "your limit resets",
+            "limit resets",
+            "check your usage level",
             "hết lượt tạo video",
             "không thể tạo thêm video",
             "quay lại vào ngày mai",
@@ -586,6 +593,12 @@ class GeminiVideoGenerator:
             "cannot make more videos today",
             "today, but i can still",
             "hôm nay, nhưng tôi vẫn có thể",
+            "khi giới hạn của bạn được đặt lại",
+            "giới hạn của bạn được đặt lại",
+            "kiểm tra mức sử dụng của bạn",
+            "tạo thêm video ngay khi",
+            "tạo thêm video khi",
+            "đặt lại giới hạn",
         ]
         text_lower = text.lower()
         for kw in daily_limit_keywords:
@@ -778,7 +791,7 @@ class GeminiVideoGenerator:
         return (
             f"Aesthetic TikTok fashion video, 9:16 vertical. "
             f"{subject} styling '{cleaned_name}' walks confidently toward camera, strikes a cool pose "
-            "and does a fast fashion transition synchronized to a viral Vietnamese V-pop beat. "
+            "and does a fast fashion transition. "
             "Dynamic angles, warm studio lighting. Product clearly visible. No text, no watermark."
         )
 
@@ -931,13 +944,11 @@ class GeminiVideoGenerator:
         )
 
         if gender == "male":
-            subject = "a stylish young Vietnamese man"
+            subject = "Một nam thanh niên Việt Nam lịch lãm phong cách"
         else:
-            subject = "a stylish young Vietnamese woman"
+            subject = "Một nữ thanh niên Việt Nam xinh xắn phong cách"
 
-        music_name = self._pick_consistent_music(product_name)
-        music_rule = f"Background music: {music_name} (upbeat, clearly audible). "
-        voiceover = f"Vietnamese voiceover (natural, warm): '{voiceover_line}'"
+        voiceover = f"Thuyết minh Tiếng Việt: '{voiceover_line}'"
 
         # ============================================================
         # CLIP 1: UNBOXING + HANDS-ON REVIEW
@@ -945,38 +956,38 @@ class GeminiVideoGenerator:
         if segment_index == 0:
             if prod_type == "clothing":
                 return (
-                    f"TikTok product review, 9:16 vertical, warm cinematic lighting. "
-                    f"{subject.capitalize()} holds up '{cleaned_name}' (from reference image), unfolds it and shows fabric texture with a genuinely impressed smile. "
-                    f"Macro close-up on stitching detail, then pulls back to reveal full design. "
-                    f"{music_rule}{voiceover}"
+                    f"Video review sản phẩm chuẩn TikTok dọc 9:16, ánh sáng điện ảnh ấm áp. "
+                    f"{subject} giơ mẫu '{cleaned_name}' lên trước máy quay, mở phẳng áo khoe bề mặt chất liệu vải mịn màng với nụ cười hài lòng. "
+                    f"Quay cận cảnh chi tiết đường may tỉ mỉ, sau đó lùi máy quay để hiển thị toàn bộ kiểu dáng phom áo. "
+                    f"{voiceover}"
                 )
             elif prod_type == "footwear":
                 return (
-                    f"TikTok shoe review, 9:16 vertical, warm cinematic lighting. "
-                    f"{subject.capitalize()} holds '{cleaned_name}' (from reference image) close to camera, tilts it showing sole and material texture. "
-                    f"Macro close-up on stitching and heel construction, reaction: pleasantly surprised. "
-                    f"{music_rule}{voiceover}"
+                    f"Video review giày TikTok dọc 9:16, ánh sáng điện ảnh sang trọng. "
+                    f"{subject} cầm đôi '{cleaned_name}' gần máy quay, nghiêng các góc hiển thị đế giày và chất liệu da xịn. "
+                    f"Quay cận cảnh chi tiết đường chỉ khâu và gót giày. "
+                    f"{voiceover}"
                 )
             elif prod_type == "cosmetics":
                 return (
-                    f"TikTok product unboxing, 9:16 vertical, warm cinematic lighting, cozy beauty vlog style. "
-                    f"{subject.capitalize()} gently takes '{cleaned_name}' (from reference image) out of packaging onto a rustic display stand. "
-                    f"Macro extreme close-up on packaging and texture details, reaction: genuinely impressed, nodding with a natural smile. "
-                    f"{music_rule}{voiceover}"
+                    f"Video mở hộp mỹ phẩm TikTok dọc 9:16, bối cảnh vlog ấm áp. "
+                    f"{subject} nhẹ nhàng lấy sản phẩm '{cleaned_name}' ra khỏi hộp đặt lên kệ trưng bày. "
+                    f"Quay cận cảnh thiết kế vỏ hộp và chất son mịn màng, gật đầu nụ cười tươi bộc lộ sự ưng ý. "
+                    f"{voiceover}"
                 )
             elif prod_type == "electronics":
                 return (
-                    f"TikTok tech unboxing, 9:16 vertical, sleek modern studio lighting. "
-                    f"{subject.capitalize()} unboxes '{cleaned_name}' (from reference image) on a clean wooden desk, holding it up to reveal build quality. "
-                    f"Macro close-up on buttons, finish and sleek design details. "
-                    f"{music_rule}{voiceover}"
+                    f"Video mở hộp đồ công nghệ TikTok dọc 9:16, ánh sáng studio hiện đại. "
+                    f"{subject} mở hộp '{cleaned_name}' trên bàn gỗ sạch đẽ, giơ sản phẩm lên hiển thị độ hoàn thiện cao cấp. "
+                    f"Quay cận cảnh các nút bấm, bề mặt kim loại mượt mà và thiết kế sang trọng. "
+                    f"{voiceover}"
                 )
             else:
                 return (
-                    f"TikTok product unboxing, 9:16 vertical, warm cinematic lighting. "
-                    f"{subject.capitalize()} takes '{cleaned_name}' (from reference image) out of packaging and holds it up showing all angles. "
-                    f"Macro close-up on key design details, reaction: genuinely impressed, nodding with a smile. "
-                    f"{music_rule}{voiceover}"
+                    f"Video mở hộp sản phẩm TikTok dọc 9:16, ánh sáng ấm áp. "
+                    f"{subject} lấy '{cleaned_name}' ra khỏi hộp và giơ lên hiển thị các góc độ. "
+                    f"Quay cận cảnh chi tiết thiết kế điểm nhấn sản phẩm với nụ cười ưng ý. "
+                    f"{voiceover}"
                 )
 
         # ============================================================
@@ -985,38 +996,35 @@ class GeminiVideoGenerator:
         elif segment_index == total_segments - 1:
             if prod_type == "clothing":
                 return (
-                    f"TikTok outfit try-on, 9:16 vertical, bright natural lighting. "
-                    f"{subject.capitalize()} already WEARING '{cleaned_name}', walks confidently toward camera, "
-                    "does a smooth 360 spin, then strikes a relaxed fashion pose with a bright smile at the camera. "
-                    f"{music_rule}{voiceover}"
+                    f"Video mặc thử đồ TikTok dọc 9:16, ánh sáng tự nhiên tươi sáng. "
+                    f"{subject} mặc chiếc '{cleaned_name}' tự tin bước về phía máy quay, xoay nhẹ 360 độ khoe phom dáng ôm tôn đường nét cơ thể. "
+                    f"Mỉm cười thân thiện trước ống kính. "
+                    f"{voiceover}"
                 )
             elif prod_type == "footwear":
                 return (
-                    f"TikTok shoe try-on, 9:16 vertical, bright natural lighting. "
-                    f"Camera starts at floor level on '{cleaned_name}' shoes worn by {subject}, slowly tilts up revealing full outfit. "
-                    f"{subject.capitalize()} takes a few stylish steps, looks down at shoes with a satisfied happy smile. "
-                    f"{music_rule}{voiceover}"
+                    f"Video đi thử giày TikTok dọc 9:16, ánh sáng tự nhiên. "
+                    f"Máy quay bắt đầu từ dưới sàn lên đôi '{cleaned_name}' được đi bởi {subject}, từ từ hướng lên toàn bộ trang phục. "
+                    f"{subject} bước đi vài bước thời trang, nhìn xuống chân với nụ cười tươi vui ưng ý. "
+                    f"{voiceover}"
                 )
             elif prod_type == "cosmetics":
                 return (
-                    f"TikTok beauty review, 9:16 vertical, warm golden hour lighting. "
-                    f"{subject.capitalize()} holds uncapped '{cleaned_name}' beside her cheek, showing texture and swatch up close, "
-                    "then tilts product toward camera with an authentic approving smile and friendly nod. "
-                    f"{music_rule}{voiceover}"
+                    f"Video trải nghiệm mỹ phẩm TikTok dọc 9:16, ánh sáng hoàng hôn ấm áp. "
+                    f"{subject} cầm sản phẩm '{cleaned_name}' bên má, khoe chất son mịn màng cận cảnh, gật đầu nhẹ nhàng mỉm cười trước máy quay. "
+                    f"{voiceover}"
                 )
             elif prod_type == "electronics":
                 return (
-                    f"TikTok tech demo, 9:16 vertical, modern bright studio lighting. "
-                    f"{subject.capitalize()} actively demonstrates '{cleaned_name}' in action, showing smooth functionality. "
-                    "Gives a thumbs-up to camera with a satisfied smile. "
-                    f"{music_rule}{voiceover}"
+                    f"Video trải nghiệm đồ công nghệ TikTok dọc 9:16, ánh sáng studio hiện đại. "
+                    f"{subject} thao tác sử dụng chiếc '{cleaned_name}' thực tế mượt mà, giơ ngón tay cái hài lòng trước máy quay. "
+                    f"{voiceover}"
                 )
             else:
                 return (
-                    f"TikTok product demo, 9:16 vertical, bright natural lighting. "
-                    f"{subject.capitalize()} actively uses '{cleaned_name}' and demonstrates it working smoothly. "
-                    f"Holds product toward camera with a thumbs-up and genuine happy smile. "
-                    f"{music_rule}{voiceover}"
+                    f"Video trải nghiệm sản phẩm TikTok dọc 9:16, ánh sáng tươi sáng. "
+                    f"{subject} thao tác sử dụng '{cleaned_name}' mượt mà, giơ sản phẩm trước máy quay với ngón tay cái hài lòng và nụ cười rạng rỡ. "
+                    f"{voiceover}"
                 )
 
         # ============================================================
@@ -1024,37 +1032,34 @@ class GeminiVideoGenerator:
         # ============================================================
         else:
             return (
-                f"TikTok product detail, 9:16 vertical, soft studio lighting. "
-                f"{subject.capitalize()} examines '{cleaned_name}' closely, showing specific quality features with a curious impressed expression. "
-                f"Macro close-up on material texture and construction detail. "
-                f"{music_rule}{voiceover}"
+                f"Video cận cảnh chi tiết sản phẩm TikTok dọc 9:16, ánh sáng studio dịu nhẹ. "
+                f"{subject} quan sát chiếc '{cleaned_name}' tỉ mỉ, khoe các tính năng chất lượng cận cảnh. "
+                f"Quay siêu cận cảnh vào bề mặt chất liệu và đường nét thiết kế. "
+                f"{voiceover}"
             )
 
     def _build_safe_fallback_prompt(self, product_name: str, segment_index: int, total_segments: int) -> str:
-
-        """Prompt dự phòng an toàn: chỉ sản phẩm + nhạc nền, không người, đảm bảo qua safety filter."""
+        """Prompt dự phòng an toàn: chỉ sản phẩm, không người, đảm bảo qua safety filter bằng Tiếng Việt 100%."""
         prod_type = self._determine_product_type(product_name)
         cleaned_name = self._clean_product_name(product_name)
-        music_name = self._pick_consistent_music(product_name)
-        music_line = f"Background music: {music_name} (upbeat V-pop, clearly audible). "
 
         if prod_type == "clothing":
             return (
-                f"Aesthetic 9:16 product showcase. '{cleaned_name}' displayed on a stylish hanger. "
-                f"Camera slowly pans and zooms into fabric texture and design details, cinematic commercial lighting. "
-                f"{music_line}No text, no watermark."
+                f"Trưng bày sản phẩm nghệ thuật dọc 9:16. Mẫu '{cleaned_name}' được treo trên móc áo thời trang xinh xắn. "
+                f"Máy quay từ từ lia và phóng to vào chi tiết chất liệu vải và đường may tỉ mỉ, ánh sáng điện ảnh đẹp mắt. "
+                f"Không hiển thị chữ hay logo watermark."
             )
         elif prod_type == "footwear":
             return (
-                f"Aesthetic 9:16 product showcase. '{cleaned_name}' on a clean surface, camera pulls back for full reveal. "
-                f"Macro close-up of sole grip and material, beautiful studio lighting. "
-                f"{music_line}No text, no watermark."
+                f"Trưng bày sản phẩm nghệ thuật dọc 9:16. Đôi '{cleaned_name}' đặt trên mặt bàn sạch đẽ, máy quay lùi dần ra xa để lộ toàn bộ thiết kế. "
+                f"Cận cảnh chất liệu và đế giày chống trượt, ánh sáng studio sang trọng. "
+                f"Không hiển thị chữ hay logo watermark."
             )
         else:
             return (
-                f"Aesthetic 9:16 product showcase. '{cleaned_name}' on a minimalist wooden surface. "
-                f"Camera slowly rotates revealing design from all angles, macro close-up of key features. "
-                f"{music_line}No text, no watermark."
+                f"Trưng bày sản phẩm nghệ thuật dọc 9:16. Sản phẩm '{cleaned_name}' đặt trên mặt gỗ tối giản. "
+                f"Máy quay xoay nhẹ nhàng hiển thị chi tiết từ mọi góc độ, quay cận cảnh điểm nhấn chất lượng. "
+                f"Không hiển thị chữ hay logo watermark."
             )
 
     def generate_multi_segment_video(
@@ -1074,10 +1079,8 @@ class GeminiVideoGenerator:
         self.select_video_mode_if_needed()
 
         # Log kịch bản tổng thể
-        music_name = self._pick_consistent_music(product_name)
         cleaned_name = self._clean_product_name(product_name)
         logger.info(f"📋 Kịch bản tổng thể cho '{cleaned_name}':")
-        logger.info(f"   🎵 Nhạc nền xuyên suốt: {music_name}")
         for si in range(num_segments):
             if si == 0:
                 logger.info(f"   📹 Clip {si+1}: HOOK + Review cận cảnh sản phẩm")

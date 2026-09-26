@@ -20,24 +20,9 @@ def scrape_tiktok_product(page: Page, product_url: str) -> tuple[str | None, str
             logger.warning(f"⚠️ Cảnh báo khi truy cập link sản phẩm: {e}. Vẫn tiếp tục trích xuất...")
         page.wait_for_timeout(5000)  # Đợi 5 giây để JS render xong ảnh
         
-        # Kiểm tra xem có bị Captcha chặn không
-        captcha_indicators = ["Verify to continue", "captcha", "verify_container", "sec.tiktok.com", "security check", "security"]
-        current_title = page.title() or ""
-        current_url = page.url or ""
-        
-        is_captcha = (
-            any(ind.lower() in current_title.lower() for ind in captcha_indicators) or
-            any(ind.lower() in current_url.lower() for ind in captcha_indicators) or
-            page.locator("text=Verify to continue").count() > 0 or
-            page.locator("#captcha-verify-image").count() > 0
-        )
-        
-        if is_captcha:
-            logger.warning("⚠️ PHÁT HIỆN CAPTCHA BẢO MẬT CỦA TIKTOK SHOP!")
-            logger.warning("👉 Hãy chuyển sang cửa sổ trình duyệt Chrome đang mở, thực hiện giải captcha (kéo mảnh ghép/chọn hình).")
-            logger.warning("👉 Sau khi giải xong và thấy trang thông tin sản phẩm hiện ra, quay lại đây nhấn ENTER để tiếp tục...")
-            input("\n[👉 GIẢI CAPTCHA XONG THÌ NHẤN ENTER TẠI ĐÂY...]")
-            page.wait_for_timeout(3000)  # Đợi 3 giây để trang cập nhật dữ liệu sản phẩm mới
+        # Kiểm tra và chờ tự động nếu gặp Captcha
+        from src.utils import check_and_wait_for_captcha
+        check_and_wait_for_captcha(page, max_wait_sec=180)
         
         # 1. Trích xuất tên sản phẩm
         title_selectors = [

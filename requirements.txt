@@ -4,3 +4,5 @@ loguru==0.7.2
 click==8.1.7
 imageio-ffmpeg>=0.4.9
 requests
+flask>=3.0.0
+

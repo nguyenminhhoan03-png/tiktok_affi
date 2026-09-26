@@ -34,6 +34,11 @@ class TikTokUploader:
     def open_upload_page(self) -> None:
         logger.info("🌐 Mở TikTok Studio Upload...")
         self.page.goto(self.UPLOAD_URL, wait_until="domcontentloaded")
+        
+        # Kiểm tra và chờ giải Captcha nếu có trước khi tìm input file
+        from src.utils import check_and_wait_for_captcha
+        check_and_wait_for_captcha(self.page, max_wait_sec=180)
+
         # Thay vì networkidle (dễ bị treo do theo dõi nền), ta chờ input file được gắn vào DOM (attached)
         # Vì input file type=file thường được ẩn bằng CSS (display: none/opacity: 0), ta chờ state="attached"
         try:
@@ -213,23 +218,86 @@ class TikTokUploader:
 
             # ── BƯỚC 3: Modal "Add product links" – search tên sản phẩm ──
             logger.info("🔍 Bước 3: Tìm kiếm sản phẩm trong modal Add product links...")
+            
+            # Tối ưu hóa từ khóa tìm kiếm: trích xuất 2-3 từ quan trọng nhất hoặc 15 ký tự đầu
+            short_search_term = ""
+            if name:
+                words = [w for w in name.split() if len(w) > 1 and w.lower() not in ["mẫu", "dự", "tiệc", "nữ", "nam", "sản", "phẩm", "cao", "cấp"]]
+                if len(words) >= 2:
+                    short_search_term = " ".join(words[:3])
+                else:
+                    short_search_term = name[:15]
+            
             search_input = self.page.locator(
                 'input[placeholder*="Search products"], '
                 'input[placeholder*="Tìm kiếm"], '
-                'input.TUXTextInputCore-input[type="text"]'
+                'input.TUXTextInputCore-input[type="text"], '
+                'div[role="dialog"] input[type="text"]'
             ).first
-            search_input.wait_for(state="visible", timeout=10000)
-            search_input.click()
-            # Dùng toàn bộ tên sản phẩm để search chính xác, tránh nhầm lẫn sản phẩm khác
-            search_input.fill(name)
-            self._delay()
-            self.page.keyboard.press("Enter")
-            self.page.wait_for_timeout(2000)  # Chờ kết quả tìm kiếm load
+            
+            has_search_box = False
+            try:
+                if search_input.is_visible(timeout=5000):
+                    has_search_box = True
+            except Exception:
+                pass
+
+            if has_search_box and short_search_term:
+                logger.info(f"🔎 Nhập từ khóa tìm kiếm ngắn gọn: '{short_search_term}'...")
+                search_input.click()
+                search_input.fill(short_search_term)
+                self._delay()
+                self.page.keyboard.press("Enter")
+                self.page.wait_for_timeout(2000)  # Chờ kết quả tìm kiếm load
+
+            # Kiểm tra xem có sản phẩm nào hiển thị trong bảng không
+            first_row = self.page.locator('tbody tr').first
+            is_product_found = False
+            try:
+                if first_row.is_visible(timeout=4000):
+                    is_product_found = True
+            except Exception:
+                pass
+
+            # Nếu không tìm thấy kết quả bằng từ khóa ngắn -> Xóa search box để hiển thị toàn bộ danh sách Tủ đồ
+            if not is_product_found and has_search_box:
+                logger.warning(f"⚠️ Tìm kiếm từ khóa '{short_search_term}' trả về 0 kết quả. Tiến hành xóa ô tìm kiếm để hiển thị toàn bộ Tủ đồ...")
+                search_input.click()
+                self.page.keyboard.press("Control+A")
+                self.page.keyboard.press("Backspace")
+                self.page.keyboard.press("Enter")
+                self.page.wait_for_timeout(2500)
+                
+                try:
+                    if first_row.is_visible(timeout=3000):
+                        is_product_found = True
+                except Exception:
+                    pass
+
+            # Nếu vẫn không có sản phẩm nào (Tủ đồ TikTok trống hoàn toàn)
+            if not is_product_found:
+                logger.warning(
+                    "⚠️ CẢNH BÁO HỆ THỐNG: Màn hình TikTok Studio báo không có sản phẩm nào trong Tủ đồ (No products in your showcase).\n"
+                    "💡 NGUYÊN NHÂN: Tài khoản TikTok đang dùng chưa liên kết hoặc chưa bấm 'Thêm vào Tủ đồ' (Add to Showcase) trên App điện thoại.\n"
+                    "👉 CÁCH KHẮC PHỤC: Mở App TikTok trên điện thoại > Hồ sơ (Profile) > TikTok Shop > Thêm sản phẩm vào Tủ đồ trước khi chạy tool."
+                )
+                logger.info("🧹 Đang đóng modal sản phẩm bằng nút Cancel để tiếp tục quy trình đăng video...")
+                cancel_btn = self.page.locator(
+                    'div[role="dialog"] button:has-text("Cancel"), '
+                    'div[role="dialog"] button:has-text("Hủy"), '
+                    'button:has-text("Cancel"), button:has-text("Hủy")'
+                ).first
+                if cancel_btn.count() > 0 and cancel_btn.is_visible():
+                    try:
+                        cancel_btn.click(timeout=3000)
+                    except Exception:
+                        cancel_btn.evaluate("el => el.click()")
+                    self._delay()
+                return False
 
             # ── BƯỚC 4: Chọn sản phẩm đầu tiên trong danh sách ──
             logger.info("☑️  Bước 4: Chọn sản phẩm đầu tiên trong danh sách...")
-            first_row = self.page.locator('tbody tr').first
-            first_row.wait_for(state="visible", timeout=10000)
+            first_row.wait_for(state="visible", timeout=5000)
 
             # Log cấu trúc HTML của row đầu tiên để phục vụ mục đích debug
             try:

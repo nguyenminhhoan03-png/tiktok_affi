@@ -18,8 +18,7 @@ YÊU CẦU QUAN TRỌNG:
 4. Phân cảnh hình ảnh (Visual Prompts): Mô tả hoàn toàn bằng TIẾNG VIỆT 100% cho từng phân đoạn (Scene).
    - Định dạng: Video dọc 9:16 chuẩn TikTok.
    - Mô tả chi tiết bằng Tiếng Việt: Bối cảnh studio/phòng xinh xắn, người nam/nữ trẻ trung Việt Nam, góc quay cận cảnh chi tiết sản phẩm, chuyển động camera chậm, ánh sáng điện ảnh ấm áp, hành động thử/dùng sản phẩm thực tế.
-   - Nhạc nền: Đề xuất tên bài nhạc V-pop hot trend.
-   - Tuyệt đối KHÔNG sử dụng tiếng Anh trong mô tả phân cảnh.
+   - Tuyệt đối KHÔNG sử dụng tiếng Anh trong mô tả phân cảnh. KHÔNG bao gồm nhạc nền hay đề xuất bài hát.
 
 Trả về DUY NHẤT một định dạng JSON thuần túy (không bọc trong markdown block nếu có thể, hoặc bọc trong JSON block) với cấu trúc như sau:
 {
