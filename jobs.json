@@ -1,11 +1,78 @@
 [
   {
-    "product_url": "https://vt.tiktok.com/ZS9AqBc9xtDgT-7TsDe/",
+    "product_url": "https://vt.tiktok.com/ZS9DDTDp3JSSk-ZPU8g/",
+    "product_name": "",
+    "prompt": "auto",
+    "caption": "auto",
+    "video_segments": 2,
+    "tiktok_account": "acc1",
+    "status": "failed",
+    "success": false,
+    "error_msg": "Đăng video lên TikTok thất bại"
+  },
+  {
+    "product_url": "https://vt.tiktok.com/ZS9DDTU8jmEnt-RSgGK/",
+    "product_name": "",
+    "prompt": "auto",
+    "caption": "auto",
+    "video_segments": 2,
+    "tiktok_account": "acc1",
+    "status": "failed",
+    "success": false,
+    "error_msg": "Lỗi render video từ Gemini"
+  },
+  {
+    "product_url": "https://vt.tiktok.com/ZS9DDTygwwJ6R-Eo0Vc/",
     "product_name": "",
     "prompt": "auto",
     "caption": "auto",
     "video_segments": 2,
     "tiktok_account": "acc1",
     "status": "processing"
+  },
+  {
+    "product_url": "https://vt.tiktok.com/ZS9DDTfUV1npb-KgNld/",
+    "product_name": "",
+    "prompt": "auto",
+    "caption": "auto",
+    "video_segments": 2,
+    "tiktok_account": "acc1",
+    "status": "pending"
+  },
+  {
+    "product_url": "https://vt.tiktok.com/ZS9DDTPxGVkMo-h3VZS/",
+    "product_name": "",
+    "prompt": "auto",
+    "caption": "auto",
+    "video_segments": 2,
+    "tiktok_account": "acc1",
+    "status": "pending"
+  },
+  {
+    "product_url": "https://vt.tiktok.com/ZS9DDTaa71fjb-R514f/",
+    "product_name": "",
+    "prompt": "auto",
+    "caption": "auto",
+    "video_segments": 2,
+    "tiktok_account": "acc1",
+    "status": "pending"
+  },
+  {
+    "product_url": "https://vt.tiktok.com/ZS9DDTH3oTaSn-NE6nQ/",
+    "product_name": "",
+    "prompt": "auto",
+    "caption": "auto",
+    "video_segments": 2,
+    "tiktok_account": "acc1",
+    "status": "pending"
+  },
+  {
+    "product_url": "https://vt.tiktok.com/ZS9DDTujJcUag-WKMoo/",
+    "product_name": "",
+    "prompt": "auto",
+    "caption": "auto",
+    "video_segments": 2,
+    "tiktok_account": "acc1",
+    "status": "pending"
   }
 ]

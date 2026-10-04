@@ -349,45 +349,41 @@ def build_auto_prompt(product_name: str, product_description: str | None = None)
     addr2 = "cả nhà" if is_male else "mọi người"
 
     if prod_type == "clothing":
-        vo = f"Review thực tế mẫu {cleaned_name} đang siêu hot này nha! Cầm lên sờ thử chất vải mềm mịn, đường may tỉ mỉ form chuẩn đét luôn."
-        visual = (
-            f"Cinematic 9:16 TikTok fashion video. "
-            f"A {subject} wearing '{cleaned_name}' "
-            f"walks confidently in a bright minimal studio. "
-            "Smooth slow-motion handheld camera, soft warm lighting, close-up on fabric texture and flowing silhouette."
+        return (
+            f"Cinematic 9:16 vertical TikTok fashion showcase. Photorealistic 4k. "
+            f"A {subject} holding and displaying the exact product '{cleaned_name}' "
+            f"in a bright minimal studio. Smooth slow-motion handheld camera movement, fluid natural motion, soft warm lighting, close-up on fabric texture and silhouette. "
+            f"100% visual consistency with the reference product image."
         )
     elif prod_type == "footwear":
-        vo = f"Review đôi {cleaned_name} siêu cháy cho {addr} nè! Cầm lên là thấy da mịn, đế chắc chắn, form gọn gàng tôn dáng cực kỳ."
-        visual = (
-            f"Cinematic 9:16 TikTok shoe showcase. "
+        return (
+            f"Cinematic 9:16 vertical TikTok shoe showcase. Photorealistic 4k. "
             f"Camera starts at floor level revealing '{cleaned_name}' "
-            f"on a {subject}'s feet walking elegantly on a clean floor. "
-            "Slow-motion macro close-up of sole material and design detail, warm natural studio lighting."
+            f"on a {subject}'s feet walking gracefully forward. "
+            f"Slow-motion macro camera tracking shot of shoe leather texture, sole detail, soft natural lighting, fluid motion. "
+            f"100% visual consistency with reference product photo."
         )
     elif prod_type == "cosmetics":
-        vo = f"Tôi cầm cái {cleaned_name} này lên mà thấy đáng tiền ngay — thiết kế gọn, chất son mượt đỉnh cao!"
-        visual = (
-            f"TikTok product unboxing, 9:16 vertical, warm cinematic lighting, cozy beauty vlog vibe. "
-            f"A {subject} gently holds '{cleaned_name}' near her cheek, showing texture and sleek packaging. "
-            "Macro extreme close-up on packaging details, reaction: genuinely impressed, nodding with a warm smile."
+        return (
+            f"Cinematic 9:16 vertical TikTok beauty vlog showcase. Photorealistic 4k. "
+            f"A {subject} gently holds '{cleaned_name}' near face, showing texture and sleek packaging with a glowing smile. "
+            f"Macro extreme close-up on packaging details, soft beauty lighting, shallow depth of field, fluid graceful motion. "
+            f"100% visual consistency with reference product image."
         )
     elif prod_type == "electronics":
-        vo = f"Unbox em {cleaned_name} công nghệ siêu nét này {addr2}! Thiết kế hiện đại, cầm chắc tay, độ hoàn thiện tỉ mỉ cực kỳ."
-        visual = (
-            f"TikTok tech unboxing, 9:16 vertical, sleek modern studio lighting. "
-            f"A {subject} unboxes '{cleaned_name}' on a clean wooden desk, holding it up to reveal build quality. "
-            "Macro close-up on buttons, metallic finish and sleek design details with a satisfied smile."
+        return (
+            f"Cinematic 9:16 vertical TikTok tech showcase. Photorealistic 4k. "
+            f"A {subject} presents '{cleaned_name}' on a clean modern wooden desk, holding it up to reveal build quality. "
+            f"Macro close-up on buttons, sleek metallic finish, smooth camera panning, crisp 60fps. "
+            f"100% visual consistency with reference photo."
         )
     else:
-        vo = f"Tôi cầm cái {cleaned_name} này lên mà thấy đáng tiền ngay — thiết kế gọn, chất tốt cực kỳ!"
-        visual = (
-            f"TikTok product unboxing, 9:16 vertical, warm cinematic lighting. "
-            f"A {subject} takes '{cleaned_name}' out of packaging and holds it up showing all angles. "
-            "Macro close-up on key design details, reaction: genuinely impressed, nodding with a smile."
+        return (
+            f"Cinematic 9:16 vertical TikTok product showcase. Photorealistic 4k. "
+            f"A {subject} takes '{cleaned_name}' out of packaging and holds it up showing all angles with a genuine smile. "
+            f"Macro close-up on key design details, soft warm lighting, smooth camera tracking motion. "
+            f"100% visual consistency with reference image."
         )
-
-    voiceover = f"Vietnamese voiceover (natural, warm): '{vo}'"
-    return f"{visual} {voiceover}"
 
 
 def update_job_in_file(jobs_path: Path, target_job: dict, status: str, error_msg: str | None = None):
@@ -522,8 +518,14 @@ def run_pipeline():
             except Exception as e:
                 logger.error(f"❌ Lỗi khi quét thông tin sản phẩm từ TikTok Shop: {e}")
 
+        INVALID_TITLE_KEYWORDS = ["security check", "captcha", "verify to continue", "xác minh", "just a moment", "access denied"]
+        if product_name and any(kw in product_name.lower() for kw in INVALID_TITLE_KEYWORDS):
+            logger.warning(f"⚠️ Phát hiện tên sản phẩm không hợp lệ ('{product_name}'). Hủy dùng tên này.")
+            product_name = None
+
         # Fallback tên sản phẩm nếu không tìm thấy
         if not product_name:
+            logger.warning("⚠️ Không thể tự động cào tên sản phẩm từ link (do TikTok chặn Captcha/Security Check). Bạn nên điền 'product_name' trong jobs.json để gắn link affiliate chính xác hơn.")
             product_name = "Sản phẩm Affiliate"
 
         num_segments = job.get("video_segments", 1)
@@ -783,5 +785,22 @@ def run_pipeline():
 
 
 if __name__ == "__main__":
+    import signal
+    def cleanup_on_exit(sig, frame):
+        logger.info("🛑 Đang dừng chương trình và đóng các cửa sổ trình duyệt...")
+        try:
+            import subprocess
+            subprocess.run(["pkill", "-f", "chrome.*--user-data-dir"], capture_output=True)
+            subprocess.run(["pkill", "-f", "chromium.*--user-data-dir"], capture_output=True)
+        except Exception:
+            pass
+        sys.exit(0)
+
+    try:
+        signal.signal(signal.SIGINT, cleanup_on_exit)
+        signal.signal(signal.SIGTERM, cleanup_on_exit)
+    except Exception:
+        pass
+
     cli()
 

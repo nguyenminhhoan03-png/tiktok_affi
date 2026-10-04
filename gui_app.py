@@ -524,6 +524,24 @@ class MainWindow(QMainWindow):
         else:
             QMessageBox.warning(self, "Thông báo", "⚠️ Pipeline kết thúc với một số thông báo/lỗi.")
 
+    def closeEvent(self, event):
+        """Xử lý tự động đóng tất cả trình duyệt Chrome do Playwright mở khi tắt phần mềm."""
+        try:
+            if self.pipeline_thread and self.pipeline_thread.isRunning():
+                self.pipeline_thread.terminate()
+                self.pipeline_thread.wait(2000)
+        except Exception:
+            pass
+
+        try:
+            import subprocess
+            subprocess.run(["pkill", "-f", "chrome.*--user-data-dir"], capture_output=True)
+            subprocess.run(["pkill", "-f", "chromium.*--user-data-dir"], capture_output=True)
+        except Exception:
+            pass
+
+        event.accept()
+
 def run_gui():
     app = QApplication(sys.argv)
     window = MainWindow()

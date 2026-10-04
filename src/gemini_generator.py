@@ -244,58 +244,101 @@ class GeminiVideoGenerator:
             logger.warning(f"⚠️ Bỏ qua chọn chế độ Videos (có thể đã ở đúng chế độ hoặc gặp lỗi): {e}")
 
     def upload_image_if_provided(self, image_path: str | None) -> None:
-        """Upload ảnh lên Gemini trước khi gõ prompt."""
+        """Upload ảnh lên Gemini trước khi gõ prompt, hỗ trợ đa cơ chế chọn file để đảm bảo 100% thành công."""
         if not image_path or not Path(image_path).exists():
             return
         
         logger.info(f"📤 Đang upload ảnh sản phẩm lên Gemini: {image_path}")
         self._close_overlays()
+        uploaded_successfully = False
+
+        # Cách 1: Tìm trực tiếp thẻ input file ẩn trên DOM
         try:
-            # 1. Tìm ô nhập liệu (input "Hỏi Gemini") để xác định vị trí nút "+"
-            #    Nút "+" nằm ngay bên trái ô input, cùng hàng
-            input_box = self.page.locator(
-                'div[contenteditable="true"], '
-                'textarea[placeholder*="Gemini"], '
-                'textarea[placeholder*="Describe"], '
-                'textarea[placeholder*="prompt"]'
-            ).first
-            input_box.wait_for(state="visible", timeout=10000)
-            box = input_box.bounding_box()
-            
-            if not box:
-                logger.error("❌ Không tìm thấy ô nhập liệu Gemini để xác định vị trí nút +")
-                return
-            
-            # Click vào nút "+" — nằm ngay bên trái ô input (khoảng 30-40px về bên trái)
-            plus_x = box['x'] - 30
-            plus_y = box['y'] + box['height'] / 2
-            logger.info(f"👉 Click nút + tại tọa độ ({plus_x:.0f}, {plus_y:.0f})...")
-            self.page.mouse.click(plus_x, plus_y)
-            self._delay()
- 
-            # 2. Bắt file chooser khi click vào nút "Upload files" / "Tải tệp lên" trong menu popup
-            with self.page.expect_file_chooser() as fc_info:
-                menu_item = self.page.locator(
-                    "button[role='menuitem']:has-text('Upload files'), "
-                    "button[role='menuitem']:has-text('Tải tệp lên'), "
-                    "button[role='menuitem']:has-text('Upload'), "
-                    "li:has-text('Upload files'), "
-                    "li:has-text('Tải tệp lên'), "
-                    "div[role='menu'] button:has-text('Upload'), "
-                    "button:has-text('Upload files')"
-                ).first
+            file_input = self.page.locator('input[type="file"]').first
+            if file_input.count() > 0:
+                file_input.set_files(image_path)
+                logger.info("✅ Đã đính kèm ảnh sản phẩm thành công qua input[type='file']!")
+                uploaded_successfully = True
+        except Exception as fe:
+            logger.debug(f"Không thể đính kèm qua input file trực tiếp: {fe}")
+
+        # Cách 2: Bấm các nút đính kèm/upload dựa trên aria-label hoặc data-test-id
+        if not uploaded_successfully:
+            plus_selectors = [
+                'button[aria-label*="Add file" i]',
+                'button[aria-label*="Upload file" i]',
+                'button[aria-label*="Upload image" i]',
+                'button[aria-label*="Upload" i]',
+                'button[aria-label*="Attach" i]',
+                'button[aria-label*="Thêm" i]',
+                'button[aria-label*="Tải" i]',
+                '[data-test-id*="upload" i]',
+                '[data-test-id*="attach" i]',
+                'button[class*="upload"]',
+                'button[class*="attach"]',
+            ]
+            for sel in plus_selectors:
                 try:
-                    menu_item.click(timeout=5000)
+                    btn = self.page.locator(sel).first
+                    if btn.is_visible():
+                        logger.info(f"👉 Thử click nút đính kèm ảnh theo selector: {sel}")
+                        with self.page.expect_file_chooser(timeout=4000) as fc_info:
+                            btn.click()
+                        file_chooser = fc_info.value
+                        file_chooser.set_files(image_path)
+                        uploaded_successfully = True
+                        logger.info("✅ Đã đính kèm ảnh sản phẩm thành công qua nút selector!")
+                        break
                 except Exception:
-                    menu_item.evaluate("el => el.click()")
+                    continue
+
+        # Cách 3: Fallback click theo tọa độ ô chat input + menu popup
+        if not uploaded_successfully:
+            try:
+                input_box = self.page.locator(
+                    'div[contenteditable="true"], '
+                    'textarea[placeholder*="Gemini"], '
+                    'textarea[placeholder*="Describe"], '
+                    'textarea[placeholder*="prompt"]'
+                ).first
+                input_box.wait_for(state="visible", timeout=10000)
+                box = input_box.bounding_box()
                 
-            file_chooser = fc_info.value
-            file_chooser.set_files(image_path)
-            logger.info("✅ Đã chọn ảnh thành công, chờ upload hoàn tất...")
-            # Đợi 5 giây để ảnh được tải lên hoàn toàn
+                if box:
+                    plus_x = box['x'] - 35
+                    plus_y = box['y'] + box['height'] / 2
+                    logger.info(f"👉 Click nút + tại tọa độ ({plus_x:.0f}, {plus_y:.0f})...")
+                    self.page.mouse.click(plus_x, plus_y)
+                    self._delay()
+
+                    menu_item = self.page.locator(
+                        "button[role='menuitem']:has-text('Upload files'), "
+                        "button[role='menuitem']:has-text('Tải tệp lên'), "
+                        "button[role='menuitem']:has-text('Upload'), "
+                        "li:has-text('Upload files'), "
+                        "li:has-text('Tải tệp lên'), "
+                        "div[role='menu'] button:has-text('Upload'), "
+                        "button:has-text('Upload files')"
+                    ).first
+                    
+                    with self.page.expect_file_chooser(timeout=5000) as fc_info:
+                        try:
+                            menu_item.click(timeout=3000)
+                        except Exception:
+                            menu_item.evaluate("el => el.click()")
+                    
+                    file_chooser = fc_info.value
+                    file_chooser.set_files(image_path)
+                    uploaded_successfully = True
+                    logger.info("✅ Đã chọn ảnh thành công qua menu popup!")
+            except Exception as e:
+                logger.error(f"❌ Không thể upload ảnh theo cách tọa độ: {e}")
+
+        if uploaded_successfully:
+            logger.info("⏳ Chờ Gemini xử lý ảnh sản phẩm vừa đính kèm...")
             self.page.wait_for_timeout(5000)
-        except Exception as e:
-            logger.error(f"❌ Không thể upload ảnh lên Gemini: {e}")
+        else:
+            logger.warning("⚠️ Cảnh báo: Không thể đính kèm ảnh sản phẩm! Gemini có thể sẽ render video chỉ dựa vào prompt chữ.")
  
     def generate_video(
         self,
@@ -328,9 +371,16 @@ class GeminiVideoGenerator:
 
             clean_p = prompt.replace("(from reference image)", "").replace("(match reference image)", "").replace("  ", " ").strip()
             if image_path and Path(image_path).exists():
-                final_prompt = f"Tạo cho tôi video 10s dựa trên hình ảnh đã tải lên về chủ đề: {clean_p}. Không hiển thị chữ hay logo watermark."
+                final_prompt = (
+                    f"Create a 10s cinematic 9:16 vertical video strictly animating the uploaded product reference image. "
+                    f"Maintain 100% visual fidelity, shape, color, and design of the product in the reference image photo. "
+                    f"Visual scene: {clean_p}. Fluid natural camera movement, photorealistic 4k. No text, no watermark, no logos."
+                )
             else:
-                final_prompt = f"Tạo cho tôi video 10s về chủ đề: {clean_p}. Không hiển thị chữ hay logo watermark."
+                final_prompt = (
+                    f"Create a 10s cinematic 9:16 vertical video. "
+                    f"Visual scene: {clean_p}. Fluid natural camera movement, soft volumetric studio lighting, photorealistic 4k. No text, no watermark, no logos."
+                )
 
             self._close_overlays()
             if retry_idx > 0:
@@ -930,7 +980,8 @@ class GeminiVideoGenerator:
         product_description: str | None = None
     ) -> str:
         """
-        Sinh prompt ngắn gọn (3-4 câu) cho từng clip chuẩn 9:16 vertical cinematic.
+        Sinh prompt tiếng Anh chuyên nghiệp cho từng clip chuẩn 9:16 vertical cinematic.
+        Tối ưu chuyển động linh hoạt (camera motion), ánh sáng điện ảnh và nhất quán với ảnh sản phẩm.
         """
         if "trending" in base_prompt.lower() or "dance" in base_prompt.lower():
             return self._build_trending_dance_prompt(base_prompt, product_name)
@@ -939,55 +990,44 @@ class GeminiVideoGenerator:
         cleaned_name = self._clean_product_name(product_name)
         gender = self._determine_gender(product_name, product_description)
 
-        voiceover_line = self._generate_tiktok_voiceover(
-            product_name, product_description, gender, segment_index, total_segments, prod_type
-        )
-
         if gender == "male":
-            subject = "Một nam thanh niên Việt Nam lịch lãm phong cách"
+            subject = "A handsome stylish young Vietnamese man"
         else:
-            subject = "Một nữ thanh niên Việt Nam xinh xắn phong cách"
-
-        voiceover = f"Thuyết minh Tiếng Việt: '{voiceover_line}'"
+            subject = "A beautiful stylish young Vietnamese woman"
 
         # ============================================================
-        # CLIP 1: UNBOXING + HANDS-ON REVIEW
+        # CLIP 1: UNBOXING / SHOWCASE
         # ============================================================
         if segment_index == 0:
             if prod_type == "clothing":
                 return (
-                    f"Video review sản phẩm chuẩn TikTok dọc 9:16, ánh sáng điện ảnh ấm áp. "
-                    f"{subject} giơ mẫu '{cleaned_name}' lên trước máy quay, mở phẳng áo khoe bề mặt chất liệu vải mịn màng với nụ cười hài lòng. "
-                    f"Quay cận cảnh chi tiết đường may tỉ mỉ, sau đó lùi máy quay để hiển thị toàn bộ kiểu dáng phom áo. "
-                    f"{voiceover}"
+                    f"Cinematic 9:16 vertical TikTok fashion showcase. Photorealistic 4k. "
+                    f"{subject} holds up the exact product '{cleaned_name}' to the camera, unfolding it smoothly to showcase fine fabric texture and stitching. "
+                    f"Slow-motion handheld camera movement, soft volumetric studio lighting, dynamic fluid natural motion. 100% visual consistency with the reference product image."
                 )
             elif prod_type == "footwear":
                 return (
-                    f"Video review giày TikTok dọc 9:16, ánh sáng điện ảnh sang trọng. "
-                    f"{subject} cầm đôi '{cleaned_name}' gần máy quay, nghiêng các góc hiển thị đế giày và chất liệu da xịn. "
-                    f"Quay cận cảnh chi tiết đường chỉ khâu và gót giày. "
-                    f"{voiceover}"
+                    f"Cinematic 9:16 vertical TikTok shoe showcase. Photorealistic 4k. "
+                    f"{subject} holds the exact pair of shoes '{cleaned_name}' near camera, tilting them gently to reveal leather texture, fine stitching, and sole detail. "
+                    f"Smooth tracking camera panning, soft studio lighting, fluid organic motion. 100% visual consistency with reference product image."
                 )
             elif prod_type == "cosmetics":
                 return (
-                    f"Video mở hộp mỹ phẩm TikTok dọc 9:16, bối cảnh vlog ấm áp. "
-                    f"{subject} nhẹ nhàng lấy sản phẩm '{cleaned_name}' ra khỏi hộp đặt lên kệ trưng bày. "
-                    f"Quay cận cảnh thiết kế vỏ hộp và chất son mịn màng, gật đầu nụ cười tươi bộc lộ sự ưng ý. "
-                    f"{voiceover}"
+                    f"Cinematic 9:16 vertical TikTok beauty vlog review. Photorealistic 4k. "
+                    f"{subject} gently unboxes and presents the exact cosmetic product '{cleaned_name}', showing off sleek packaging details with a genuine smile. "
+                    f"Macro camera zoom, shallow depth of field, soft beauty lighting, fluid graceful motion. 100% visual consistency with reference product image."
                 )
             elif prod_type == "electronics":
                 return (
-                    f"Video mở hộp đồ công nghệ TikTok dọc 9:16, ánh sáng studio hiện đại. "
-                    f"{subject} mở hộp '{cleaned_name}' trên bàn gỗ sạch đẽ, giơ sản phẩm lên hiển thị độ hoàn thiện cao cấp. "
-                    f"Quay cận cảnh các nút bấm, bề mặt kim loại mượt mà và thiết kế sang trọng. "
-                    f"{voiceover}"
+                    f"Cinematic 9:16 vertical TikTok tech unboxing. Photorealistic 4k. "
+                    f"{subject} unboxes the exact tech product '{cleaned_name}' on a modern clean desk, holding it up to display metallic finish and sleek buttons. "
+                    f"Smooth tracking camera movement, crisp 60fps, professional studio lighting. 100% visual consistency with reference product photo."
                 )
             else:
                 return (
-                    f"Video mở hộp sản phẩm TikTok dọc 9:16, ánh sáng ấm áp. "
-                    f"{subject} lấy '{cleaned_name}' ra khỏi hộp và giơ lên hiển thị các góc độ. "
-                    f"Quay cận cảnh chi tiết thiết kế điểm nhấn sản phẩm với nụ cười ưng ý. "
-                    f"{voiceover}"
+                    f"Cinematic 9:16 vertical TikTok product review. Photorealistic 4k. "
+                    f"{subject} holds and demonstrates the exact product '{cleaned_name}', showing key design details and premium build quality with a warm smile. "
+                    f"Handheld slow-motion camera orbit, soft warm lighting, dynamic fluid motion. 100% visual consistency with reference product image."
                 )
 
         # ============================================================
@@ -996,35 +1036,33 @@ class GeminiVideoGenerator:
         elif segment_index == total_segments - 1:
             if prod_type == "clothing":
                 return (
-                    f"Video mặc thử đồ TikTok dọc 9:16, ánh sáng tự nhiên tươi sáng. "
-                    f"{subject} mặc chiếc '{cleaned_name}' tự tin bước về phía máy quay, xoay nhẹ 360 độ khoe phom dáng ôm tôn đường nét cơ thể. "
-                    f"Mỉm cười thân thiện trước ống kính. "
-                    f"{voiceover}"
+                    f"Cinematic 9:16 vertical TikTok fashion try-on showcase. Photorealistic 4k. "
+                    f"{subject} wearing the exact outfit '{cleaned_name}' walks confidently toward camera in a bright studio, doing a graceful 360-degree spin to highlight fit and dynamic movement. "
+                    f"Dynamic slow-motion tracking shot, bright natural lighting, happy friendly smile. 100% visual consistency with reference photo."
                 )
             elif prod_type == "footwear":
                 return (
-                    f"Video đi thử giày TikTok dọc 9:16, ánh sáng tự nhiên. "
-                    f"Máy quay bắt đầu từ dưới sàn lên đôi '{cleaned_name}' được đi bởi {subject}, từ từ hướng lên toàn bộ trang phục. "
-                    f"{subject} bước đi vài bước thời trang, nhìn xuống chân với nụ cười tươi vui ưng ý. "
-                    f"{voiceover}"
+                    f"Cinematic 9:16 vertical TikTok footwear try-on. Photorealistic 4k. "
+                    f"Low angle camera starts at clean floor showing the exact shoes '{cleaned_name}' on {subject}'s feet walking stylishly forward. "
+                    f"Camera tilts up smoothly to reveal full outfit. Dynamic walking motion, natural lighting, crisp photorealistic 60fps. 100% visual consistency with reference image."
                 )
             elif prod_type == "cosmetics":
                 return (
-                    f"Video trải nghiệm mỹ phẩm TikTok dọc 9:16, ánh sáng hoàng hôn ấm áp. "
-                    f"{subject} cầm sản phẩm '{cleaned_name}' bên má, khoe chất son mịn màng cận cảnh, gật đầu nhẹ nhàng mỉm cười trước máy quay. "
-                    f"{voiceover}"
+                    f"Cinematic 9:16 vertical TikTok beauty demonstration. Photorealistic 4k. "
+                    f"{subject} applying and demonstrating the exact cosmetics product '{cleaned_name}' with smooth graceful hand gestures, glowing smiling face. "
+                    f"Macro close-up on product texture, soft cinematic lighting, shallow depth of field. 100% visual consistency with reference product image."
                 )
             elif prod_type == "electronics":
                 return (
-                    f"Video trải nghiệm đồ công nghệ TikTok dọc 9:16, ánh sáng studio hiện đại. "
-                    f"{subject} thao tác sử dụng chiếc '{cleaned_name}' thực tế mượt mà, giơ ngón tay cái hài lòng trước máy quay. "
-                    f"{voiceover}"
+                    f"Cinematic 9:16 vertical TikTok tech demo in action. Photorealistic 4k. "
+                    f"{subject} operating the exact gadget '{cleaned_name}' smoothly with interactive hands-on action, giving a satisfied thumbs up. "
+                    f"Crisp studio lighting, fluid natural movements, professional 4k 60fps."
                 )
             else:
                 return (
-                    f"Video trải nghiệm sản phẩm TikTok dọc 9:16, ánh sáng tươi sáng. "
-                    f"{subject} thao tác sử dụng '{cleaned_name}' mượt mà, giơ sản phẩm trước máy quay với ngón tay cái hài lòng và nụ cười rạng rỡ. "
-                    f"{voiceover}"
+                    f"Cinematic 9:16 vertical TikTok product in action. Photorealistic 4k. "
+                    f"{subject} using the exact product '{cleaned_name}' seamlessly, holding it up proudly toward the camera with a bright genuine smile. "
+                    f"Smooth slow-motion tracking shot, warm studio lighting, fluid motion."
                 )
 
         # ============================================================
@@ -1032,34 +1070,33 @@ class GeminiVideoGenerator:
         # ============================================================
         else:
             return (
-                f"Video cận cảnh chi tiết sản phẩm TikTok dọc 9:16, ánh sáng studio dịu nhẹ. "
-                f"{subject} quan sát chiếc '{cleaned_name}' tỉ mỉ, khoe các tính năng chất lượng cận cảnh. "
-                f"Quay siêu cận cảnh vào bề mặt chất liệu và đường nét thiết kế. "
-                f"{voiceover}"
+                f"Cinematic 9:16 vertical TikTok macro close-up. Photorealistic 4k. "
+                f"Extreme close-up camera pan highlighting fine craftsmanship, material texture, and key features of the exact product '{cleaned_name}'. "
+                f"Soft studio lighting, shallow depth of field, smooth fluid camera orbit. 100% visual consistency with reference image."
             )
 
     def _build_safe_fallback_prompt(self, product_name: str, segment_index: int, total_segments: int) -> str:
-        """Prompt dự phòng an toàn: chỉ sản phẩm, không người, đảm bảo qua safety filter bằng Tiếng Việt 100%."""
+        """Prompt dự phòng an toàn: chỉ tập trung sản phẩm nghệ thuật, đảm bảo 100% qua safety filter."""
         prod_type = self._determine_product_type(product_name)
         cleaned_name = self._clean_product_name(product_name)
 
         if prod_type == "clothing":
             return (
-                f"Trưng bày sản phẩm nghệ thuật dọc 9:16. Mẫu '{cleaned_name}' được treo trên móc áo thời trang xinh xắn. "
-                f"Máy quay từ từ lia và phóng to vào chi tiết chất liệu vải và đường may tỉ mỉ, ánh sáng điện ảnh đẹp mắt. "
-                f"Không hiển thị chữ hay logo watermark."
+                f"Cinematic 9:16 vertical TikTok commercial display. Photorealistic 4k. "
+                f"The exact clothing product '{cleaned_name}' hanging gracefully on a wooden hanger in a minimal aesthetic studio. "
+                f"Slow-motion camera pan zooming into fine fabric texture, stitching details, soft warm lighting, dynamic breeze effect. No text, no watermark."
             )
         elif prod_type == "footwear":
             return (
-                f"Trưng bày sản phẩm nghệ thuật dọc 9:16. Đôi '{cleaned_name}' đặt trên mặt bàn sạch đẽ, máy quay lùi dần ra xa để lộ toàn bộ thiết kế. "
-                f"Cận cảnh chất liệu và đế giày chống trượt, ánh sáng studio sang trọng. "
-                f"Không hiển thị chữ hay logo watermark."
+                f"Cinematic 9:16 vertical TikTok shoe showcase. Photorealistic 4k. "
+                f"The exact pair of shoes '{cleaned_name}' resting on a clean studio table. "
+                f"Slow camera orbit revealing side design, sole grip, leather finish. Soft volumetric lighting, shallow depth of field. No text, no watermark."
             )
         else:
             return (
-                f"Trưng bày sản phẩm nghệ thuật dọc 9:16. Sản phẩm '{cleaned_name}' đặt trên mặt gỗ tối giản. "
-                f"Máy quay xoay nhẹ nhàng hiển thị chi tiết từ mọi góc độ, quay cận cảnh điểm nhấn chất lượng. "
-                f"Không hiển thị chữ hay logo watermark."
+                f"Cinematic 9:16 vertical TikTok product display. Photorealistic 4k. "
+                f"The exact product '{cleaned_name}' placed on an aesthetic wooden pedestal. "
+                f"Smooth slow-motion 360 camera rotation highlighting key features, sleek material texture. Soft studio lighting. No text, no watermark."
             )
 
     def generate_multi_segment_video(
@@ -1110,11 +1147,18 @@ class GeminiVideoGenerator:
                 # Loại bỏ chuỗi (from reference image) để tránh làm Gemini hiểu nhầm bắt tải ảnh khi chưa có ảnh
                 clean_p = seg_prompt.replace("(from reference image)", "").replace("(match reference image)", "").replace("  ", " ").strip()
                 
-                # Thêm câu lệnh kích hoạt tạo video 10s trực tiếp Tiếng Việt cho Gemini Web UI
+                # Thêm câu lệnh kích hoạt tạo video 10s chuẩn điện ảnh bằng Tiếng Anh cho Gemini Veo AI
                 if image_path and Path(image_path).exists() and i == 0:
-                    final_seg_prompt = f"Tạo cho tôi video 10s dựa trên hình ảnh đã tải lên về chủ đề: {clean_p}. Không hiển thị chữ hay logo watermark."
+                    final_seg_prompt = (
+                        f"Create a 10s cinematic 9:16 vertical video strictly animating the uploaded product reference image. "
+                        f"Maintain 100% visual fidelity, shape, color, and design of the product in the reference image photo. "
+                        f"Visual scene: {clean_p}. Fluid natural camera movement, photorealistic 4k. No text, no watermark, no logos."
+                    )
                 else:
-                    final_seg_prompt = f"Tạo cho tôi video 10s về chủ đề: {clean_p}. Không hiển thị chữ hay logo watermark."
+                    final_seg_prompt = (
+                        f"Create a 10s cinematic 9:16 vertical video maintaining visual consistency with the same product. "
+                        f"Visual scene: {clean_p}. Fluid natural camera movement, soft volumetric studio lighting, photorealistic 4k. No text, no watermark, no logos."
+                    )
 
                 # Lưu danh sách video src hiện tại để phát hiện video mới
                 existing_sources = set(self._get_all_video_sources())

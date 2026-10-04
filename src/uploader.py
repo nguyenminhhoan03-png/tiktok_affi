@@ -168,12 +168,16 @@ class TikTokUploader:
     # Bước 4: Gán sản phẩm Affiliate
     # ------------------------------------------------------------------
     def tag_affiliate_product(self, product_name: str | None = None) -> bool:
+        INVALID_KEYWORDS = ["security check", "captcha", "verify to continue", "xác minh", "just a moment", "access denied", "sản phẩm affiliate"]
         name = product_name or self.config.get("product_name", "")
+        if name and any(kw in name.lower() for kw in INVALID_KEYWORDS):
+            logger.warning(f"⚠️ Tên sản phẩm không hợp lệ ('{name}'). Tool sẽ KHÔNG gõ từ khóa rác này vào ô tìm kiếm, mà hiển thị toàn bộ Tủ đồ.")
+            name = ""
+            
         if not name:
-            logger.warning("⚠️ Chưa cấu hình tên sản phẩm trong config.json")
-            return False
+            logger.warning("⚠️ Không có tên sản phẩm hợp lệ, sẽ duyệt toàn bộ danh sách Tủ đồ...")
 
-        logger.info(f"🛍️ Bắt đầu gắn sản phẩm affiliate: {name}")
+        logger.info(f"🛍️ Bắt đầu gắn sản phẩm affiliate: {name or 'Danh sách Tủ đồ'}")
 
         try:
             # ── BƯỚC 1: Click nút "+ Add" trong phần "Add link" ──
@@ -219,14 +223,17 @@ class TikTokUploader:
             # ── BƯỚC 3: Modal "Add product links" – search tên sản phẩm ──
             logger.info("🔍 Bước 3: Tìm kiếm sản phẩm trong modal Add product links...")
             
-            # Tối ưu hóa từ khóa tìm kiếm: trích xuất 2-3 từ quan trọng nhất hoặc 15 ký tự đầu
+            # Tối ưu từ khóa tìm kiếm: cho phép lên đến 30 từ (hoặc 150 ký tự) để tìm kiếm chính xác nhất
+            full_search_term = ""
             short_search_term = ""
             if name:
-                words = [w for w in name.split() if len(w) > 1 and w.lower() not in ["mẫu", "dự", "tiệc", "nữ", "nam", "sản", "phẩm", "cao", "cấp"]]
-                if len(words) >= 2:
-                    short_search_term = " ".join(words[:3])
-                else:
-                    short_search_term = name[:15]
+                clean_words = [w for w in name.split() if len(w) > 0]
+                if clean_words:
+                    # Lấy tối đa 30 từ đầu tiên (tối đa 150 ký tự) làm từ khóa chính xác
+                    full_search_term = " ".join(clean_words[:30])[:150].strip()
+                    # Từ khóa ngắn 3-4 từ để dự phòng
+                    key_words = [w for w in clean_words if w.lower() not in ["mẫu", "dự", "tiệc", "nữ", "nam", "sản", "phẩm", "cao", "cấp"]]
+                    short_search_term = " ".join(key_words[:4]) if len(key_words) >= 2 else " ".join(clean_words[:3])
             
             search_input = self.page.locator(
                 'input[placeholder*="Search products"], '
@@ -242,10 +249,11 @@ class TikTokUploader:
             except Exception:
                 pass
 
-            if has_search_box and short_search_term:
-                logger.info(f"🔎 Nhập từ khóa tìm kiếm ngắn gọn: '{short_search_term}'...")
+            target_term = full_search_term or short_search_term
+            if has_search_box and target_term:
+                logger.info(f"🔎 Nhập từ khóa tìm kiếm đầy đủ ({len(target_term.split())} từ): '{target_term}'...")
                 search_input.click()
-                search_input.fill(short_search_term)
+                search_input.fill(target_term)
                 self._delay()
                 self.page.keyboard.press("Enter")
                 self.page.wait_for_timeout(2000)  # Chờ kết quả tìm kiếm load
@@ -259,9 +267,25 @@ class TikTokUploader:
             except Exception:
                 pass
 
-            # Nếu không tìm thấy kết quả bằng từ khóa ngắn -> Xóa search box để hiển thị toàn bộ danh sách Tủ đồ
+            # Lần 2: Nếu từ khóa dài (tối đa 30 từ) trả về 0 kết quả -> Thử từ khóa ngắn 3-4 từ
+            if not is_product_found and has_search_box and short_search_term and short_search_term != target_term:
+                logger.warning(f"⚠️ Từ khóa dài '{target_term}' trả về 0 kết quả. Thử lại với từ khóa ngắn: '{short_search_term}'...")
+                search_input.click()
+                self.page.keyboard.press("Control+A")
+                self.page.keyboard.press("Backspace")
+                search_input.fill(short_search_term)
+                self._delay()
+                self.page.keyboard.press("Enter")
+                self.page.wait_for_timeout(2000)
+                try:
+                    if first_row.is_visible(timeout=3000):
+                        is_product_found = True
+                except Exception:
+                    pass
+
+            # Lần 3: Nếu vẫn không tìm thấy -> Xóa search box để hiển thị toàn bộ danh sách Tủ đồ
             if not is_product_found and has_search_box:
-                logger.warning(f"⚠️ Tìm kiếm từ khóa '{short_search_term}' trả về 0 kết quả. Tiến hành xóa ô tìm kiếm để hiển thị toàn bộ Tủ đồ...")
+                logger.warning("⚠️ Tìm kiếm từ khóa trả về 0 kết quả. Tiến hành xóa ô tìm kiếm để hiển thị toàn bộ Tủ đồ...")
                 search_input.click()
                 self.page.keyboard.press("Control+A")
                 self.page.keyboard.press("Backspace")
@@ -630,6 +654,47 @@ class TikTokUploader:
             return text
 
     # ------------------------------------------------------------------
+    # Bước 4.5: Bật nhãn AI-generated content (AIGC)
+    # ------------------------------------------------------------------
+    def enable_ai_generated_content_tag(self) -> None:
+        """
+        Tự động bật nhãn 'AI-generated content' (AIGC) trên TikTok Studio 
+        để tuân thủ quy định minh bạch của TikTok và tránh bị bóp tương tác.
+        """
+        try:
+            logger.info("🏷️ Đang kiểm tra và bật nhãn 'AI-generated content' (AIGC)...")
+            
+            # Tìm nút toggle / switch của AI-generated content
+            aigc_toggle = self.page.locator(
+                'div:has-text("AI-generated content") input[type="checkbox"], '
+                'div:has-text("AI-generated content") button[role="switch"], '
+                'div:has-text("AI-generated content") span[class*="switch"], '
+                'label:has-text("AI-generated content") input'
+            ).first
+            
+            if aigc_toggle.count() > 0 and aigc_toggle.is_visible():
+                is_checked = False
+                try:
+                    is_checked = aigc_toggle.is_checked() or aigc_toggle.get_attribute("aria-checked") == "true"
+                except Exception:
+                    pass
+                    
+                if not is_checked:
+                    logger.info("👉 Tiến hành bật công tắc 'AI-generated content'...")
+                    try:
+                        aigc_toggle.click(timeout=3000)
+                    except Exception:
+                        aigc_toggle.evaluate("el => el.click()")
+                    self._delay()
+                    logger.info("✅ Đã bật nhãn 'AI-generated content' thành công!")
+                else:
+                    logger.info("✅ Nhãn 'AI-generated content' đã được bật sẵn.")
+            else:
+                logger.info("ℹ️ Không tìm thấy nút toggle AI-generated content (có thể mặc định đã bật hoặc UI thay đổi).")
+        except Exception as e:
+            logger.warning(f"⚠️ Không thể bật công tắc AI-generated content tự động: {e}")
+
+    # ------------------------------------------------------------------
     # Bước 5: Đăng video
     # ------------------------------------------------------------------
     def post_video(self) -> bool:
@@ -735,14 +800,15 @@ class TikTokUploader:
     # ------------------------------------------------------------------
     def run(self, video_path: str, caption: str | None = None, product_name: str | None = None) -> bool:
         """
-        Chạy pipeline đầy đủ: Upload → Điền caption → Gắn sản phẩm → Scroll xuống → Bấm Post.
+        Chạy pipeline đầy đủ: Upload → Điền caption → Gắn sản phẩm → Bật nhãn AIGC → Scroll xuống → Bấm Post.
         """
         try:
             self.open_upload_page()
             self.upload_video(video_path)
             self.fill_caption(caption, product_name)
             self.tag_affiliate_product(product_name)
-            logger.info("✅ Đã điền caption và gắn sản phẩm xong. Tiến hành đăng video tự động...")
+            self.enable_ai_generated_content_tag()
+            logger.info("✅ Đã điền caption, gắn sản phẩm và bật nhãn AIGC xong. Tiến hành đăng video tự động...")
             # Scroll xuống cuối trang để nút Post hiện ra
             self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
             self._delay()
